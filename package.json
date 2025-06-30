@@ -1,0 +1,37 @@
+{
+  "name": "video-composer",
+  "version": "1.0.0",
+  "description": "A web-based video composition tool for creating videos with timeline, audio, and export features",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "http-server dist -p 3000"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "fabric": "^5.3.0",
+    "wavesurfer.js": "^7.7.5",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "vite": "^4.4.5",
+    "http-server": "^14.1.1"
+  },
+  "keywords": [
+    "video",
+    "editor",
+    "composition",
+    "timeline",
+    "webm",
+    "export"
+  ],
+  "author": "",
+  "license": "MIT"
+} 
