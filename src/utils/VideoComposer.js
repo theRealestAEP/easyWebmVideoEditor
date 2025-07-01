@@ -32,7 +32,21 @@ export class VideoComposer {
 
   async exportVideo({ mediaItems, duration, width = 1920, height = 1080, fps = 15, onProgress }) {
     try {
-      onProgress(5, 'Processing media items...');
+      // Ensure onProgress is callable
+      const safeOnProgress = typeof onProgress === 'function' ? onProgress : () => {};
+      
+      // Validate input parameters
+      if (!duration || duration <= 0) {
+        throw new Error('Duration must be a positive number');
+      }
+      if (!fps || fps <= 0) {
+        throw new Error('FPS must be a positive number');
+      }
+      if (!mediaItems || mediaItems.length === 0) {
+        throw new Error('No media items to export');
+      }
+      
+      safeOnProgress(5, 'Processing media items...');
 
       // Filter out audio items for video processing
       const visualMediaItems = mediaItems.filter(item => item.type !== 'audio');
@@ -49,13 +63,17 @@ export class VideoComposer {
 
       // Process all media items and extract their frames
       const mediaProcessors = new Map();
+      safeOnProgress(10, 'Analyzing media files...');
+      
       for (let i = 0; i < visualMediaItems.length; i++) {
         const item = visualMediaItems[i];
-        onProgress(5 + (i / visualMediaItems.length) * 20, `Processing ${item.name}...`);
+        const progressBase = visualMediaItems.length > 0 ? (i / visualMediaItems.length) * 15 : 0; // Reduced from 20 to 15
+        safeOnProgress(10 + progressBase, `Processing ${item.name}... (${i + 1}/${visualMediaItems.length})`);
         
         try {
           const frameData = await this.mediaProcessor.extractFrames(item, (progress, status) => {
-            onProgress(5 + (i / visualMediaItems.length) * 20 + (progress / 100) * (20 / visualMediaItems.length), 
+            const itemProgress = visualMediaItems.length > 0 ? (progress / 100) * (15 / visualMediaItems.length) : 0; // Reduced from 20 to 15
+            safeOnProgress(10 + progressBase + itemProgress, 
                       `${item.name}: ${status}`);
           });
           
@@ -68,13 +86,15 @@ export class VideoComposer {
         }
       }
 
-      onProgress(25, 'Setting up video recording...');
+      safeOnProgress(25, 'Media processing complete. Setting up video recording...');
 
       // Create canvas for recording
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
+
+      safeOnProgress(27, 'Configuring video encoder...');
 
       // Setup MediaRecorder with high quality settings
       const stream = canvas.captureStream(fps);
@@ -93,6 +113,8 @@ export class VideoComposer {
         videoBitsPerSecond: 8000000 // 8 Mbps for high quality
       });
 
+      safeOnProgress(29, `Using ${mimeType} codec for recording...`);
+
       const chunks = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -103,20 +125,26 @@ export class VideoComposer {
       return new Promise((resolve, reject) => {
         recorder.onstop = async () => {
           try {
+            safeOnProgress(87, 'Video recording complete. Processing final video...');
             let finalBlob = new Blob(chunks, { type: 'video/webm' });
             
             // If we have audio, we need to mix it with the video
             if (audioItems.length > 0) {
-              onProgress(90, 'Adding audio track...');
+              safeOnProgress(90, 'Adding audio track...');
               try {
                 finalBlob = await this.addAudioToVideo(finalBlob, audioItems[0], duration);
+                safeOnProgress(95, 'Audio mixing complete...');
               } catch (audioError) {
                 console.warn('Failed to add audio, proceeding with video only:', audioError);
+                safeOnProgress(95, 'Audio mixing failed, proceeding with video only...');
               }
+            } else {
+              safeOnProgress(95, 'No audio to process...');
             }
             
+            safeOnProgress(98, 'Creating download link...');
             const url = URL.createObjectURL(finalBlob);
-            onProgress(100, 'Export complete!');
+            safeOnProgress(100, 'Export complete! 🎉');
             console.log('✅ Canvas-based export completed successfully');
             resolve({ url, blob: finalBlob });
           } catch (error) {
@@ -131,17 +159,18 @@ export class VideoComposer {
 
         // Start recording
         recorder.start();
-        onProgress(30, 'Recording video frames...');
+        safeOnProgress(30, 'Recording video frames...');
 
         let frameIndex = 0;
-        const totalFrames = Math.ceil(duration * fps);
+        const totalFrames = Math.max(1, Math.ceil(duration * fps)); // Ensure at least 1 frame
         const timeStep = 1 / fps;
         let startTime = Date.now();
+        let lastProgressUpdate = 0; // Track last progress percentage to throttle updates
 
         const renderFrame = async () => {
           if (frameIndex >= totalFrames) {
             recorder.stop();
-            onProgress(85, 'Finalizing video...');
+            safeOnProgress(85, 'Finalizing video...');
             return;
           }
 
@@ -211,8 +240,16 @@ export class VideoComposer {
           }
 
           frameIndex++;
+          
+          // Throttled progress updates - only update every 5% or significant frame intervals
           const progress = 30 + (frameIndex / totalFrames) * 55;
-          onProgress(progress, `Recording frame ${frameIndex}/${totalFrames}...`);
+          const progressRounded = Math.floor(progress);
+          
+          // Update progress if it's a significant change (every 5%) or every 10 frames minimum
+          if (progressRounded >= lastProgressUpdate + 5 || frameIndex % Math.max(1, Math.floor(totalFrames / 10)) === 0 || frameIndex === totalFrames) {
+            lastProgressUpdate = progressRounded;
+            safeOnProgress(progress, `Recording frame ${frameIndex}/${totalFrames}... (${Math.round(progress)}%)`);
+          }
           
           // Use precise timing for frame rate
           const expectedTime = frameIndex * (1000 / fps);

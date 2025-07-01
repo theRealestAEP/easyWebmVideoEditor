@@ -4,6 +4,7 @@ import Timeline from './components/Timeline';
 import Toolbar from './components/Toolbar';
 import ExportProgress from './components/ExportProgress';
 import { VideoComposer } from './utils/VideoComposer';
+import TenorSearch from './components/TenorSearch';
 
 function App() {
   const [mediaItems, setMediaItems] = useState([]);
@@ -94,9 +95,103 @@ function App() {
     e.preventDefault();
     setIsDragOver(false);
     
+    // Check for files first
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
       await processFiles(files);
+      return;
+    }
+    
+    // Check for custom data (like from Tenor picker)
+    try {
+      // The gif-picker-react might set different data formats
+      // Let's check all possible data types
+      console.log('Available data types:', e.dataTransfer.types);
+      
+      // Try different data formats that gif-picker-react might use
+      let tenorData = null;
+      
+      // Try application/json first
+      try {
+        tenorData = e.dataTransfer.getData('application/json');
+        if (tenorData) {
+          console.log('Found JSON data:', tenorData);
+        }
+      } catch (err) {}
+      
+      // Try text/plain
+      if (!tenorData) {
+        try {
+          tenorData = e.dataTransfer.getData('text/plain');
+          if (tenorData && (tenorData.includes('tenor') || tenorData.includes('gif'))) {
+            console.log('Found text data:', tenorData);
+          } else {
+            tenorData = null; // Clear if not relevant
+          }
+        } catch (err) {}
+      }
+      
+      // Try text/uri-list (for URLs)
+      if (!tenorData) {
+        try {
+          const uriData = e.dataTransfer.getData('text/uri-list');
+          if (uriData && (uriData.includes('tenor') || uriData.includes('.gif'))) {
+            console.log('Found URI data:', uriData);
+            
+            // Create a media item from the URL
+            const mediaItem = {
+              id: `tenor_${Date.now()}`,
+              name: 'Tenor Sticker',
+              type: 'image',
+              subtype: 'sticker',
+              url: uriData,
+              width: 200,
+              height: 200,
+              duration: 3,
+              source: 'tenor'
+            };
+            
+            setSourceMedia(prev => [...prev, mediaItem]);
+            console.log('Added Tenor item from URI to source media:', mediaItem);
+            return;
+          }
+        } catch (err) {}
+      }
+      
+      if (tenorData) {
+        try {
+          const parsedData = JSON.parse(tenorData);
+          console.log('Parsed Tenor data:', parsedData);
+          
+          // Convert to our media format if it's a tenor item
+          if (parsedData.url || parsedData.tenorUrl) {
+            const mediaItem = {
+              id: `tenor_${parsedData.id || Date.now()}`,
+              name: parsedData.description || 'Tenor Sticker',
+              type: 'image',
+              subtype: 'sticker',
+              url: parsedData.url,
+              width: parsedData.width || 200,
+              height: parsedData.height || 200,
+              duration: 3,
+              source: 'tenor',
+              tenorUrl: parsedData.tenorUrl,
+              tags: parsedData.tags || []
+            };
+            
+            setSourceMedia(prev => [...prev, mediaItem]);
+            console.log('Added Tenor item to source media:', mediaItem);
+            return;
+          }
+        } catch (parseErr) {
+          console.log('Could not parse data as JSON:', parseErr);
+        }
+      }
+      
+      console.log('No recognizable Tenor data found in drop');
+      
+    } catch (error) {
+      console.log('Error handling drop data:', error);
     }
   }, [processFiles]);
 
@@ -205,13 +300,28 @@ function App() {
     setSelectedItem(null);
   }, []);
 
+  // Handle Tenor GIF selection
+  const handleTenorGifSelect = useCallback((gifMediaItem) => {
+    console.log('Adding Tenor GIF to source media:', gifMediaItem);
+    
+    // Only add the selected GIF to source media - let user drag to timeline
+    setSourceMedia(prev => [...prev, gifMediaItem]);
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === ' ') {
+      // Don't handle keyboard shortcuts if user is typing in an input field
+      const isTyping = document.activeElement && (
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.isContentEditable
+      );
+
+      if (e.key === ' ' && !isTyping) {
         e.preventDefault();
         handlePlayPause();
-      } else if (e.key === 'Delete' && selectedItem) {
+      } else if (e.key === 'Delete' && selectedItem && !isTyping) {
         setMediaItems(prev => prev.filter(item => item.id !== selectedItem.id));
         setSelectedItem(null);
       }
@@ -416,140 +526,167 @@ function App() {
           borderRadius: '8px',
           border: '1px solid #444',
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          height: '100%'
         }}>
+          {/* Top Half - Existing Media Files */}
           <div style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid #444',
-            fontWeight: 'bold',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            📁 Source Media
-            <span style={{ 
-              marginLeft: 'auto', 
-              fontSize: '12px', 
-              color: '#999',
-              fontWeight: 'normal'
-            }}>
-              {sourceMedia.length} items
-            </span>
-          </div>
-          
-          <div className="source-media-content" style={{
             flex: 1,
-            overflow: 'auto',
-            padding: '8px'
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0
           }}>
-            {sourceMedia.length === 0 ? (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '200px',
-                color: '#666',
-                textAlign: 'center',
-                border: '2px dashed #444',
-                borderRadius: '8px',
-                margin: '8px'
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid #444',
+              fontWeight: 'bold',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              📁 Source Media
+              <span style={{ 
+                marginLeft: 'auto', 
+                fontSize: '12px', 
+                color: '#999',
+                fontWeight: 'normal'
               }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📁</div>
-                <div style={{ marginBottom: '8px' }}>No media files</div>
-                <div style={{ fontSize: '12px' }}>Use "Add Media" to upload files</div>
-              </div>
-            ) : (
-              <div className="source-media-grid" style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                gap: '8px',
-                padding: '4px'
-              }}>
-                {sourceMedia.map(item => (
-                  <div
-                    key={item.id}
-                    className="source-media-item"
-                    draggable
-                    onDragStart={(e) => handleSourceDragStart(e, item)}
-                    style={{
-                      background: '#333',
-                      border: '1px solid #555',
-                      borderRadius: '6px',
-                      padding: '8px',
-                      cursor: 'grab',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: '6px',
-                      minHeight: '80px',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#404040';
-                      e.currentTarget.style.borderColor = '#666';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = '#333';
-                      e.currentTarget.style.borderColor = '#555';
-                    }}
-                  >
-                    {item.thumbnail ? (
-                      <img 
-                        src={item.thumbnail} 
-                        alt={item.name}
-                        style={{
+                {sourceMedia.length} items
+              </span>
+            </div>
+            
+            <div className="source-media-content" style={{
+              flex: 1,
+              overflow: 'auto',
+              padding: '8px'
+            }}>
+              {sourceMedia.length === 0 ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '120px',
+                  color: '#666',
+                  textAlign: 'center',
+                  border: '2px dashed #444',
+                  borderRadius: '8px',
+                  margin: '8px'
+                }}>
+                  <div style={{ fontSize: '32px', marginBottom: '8px' }}>📁</div>
+                  <div style={{ marginBottom: '4px', fontSize: '12px' }}>No media files</div>
+                  <div style={{ fontSize: '10px' }}>Use "Add Media" to upload files</div>
+                </div>
+              ) : (
+                <div className="source-media-grid" style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                  gap: '8px',
+                  padding: '4px'
+                }}>
+                  {sourceMedia.map(item => (
+                    <div
+                      key={item.id}
+                      className="source-media-item"
+                      draggable
+                      onDragStart={(e) => handleSourceDragStart(e, item)}
+                      style={{
+                        background: '#333',
+                        border: '1px solid #555',
+                        borderRadius: '6px',
+                        padding: '8px',
+                        cursor: 'grab',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '6px',
+                        minHeight: '80px',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#404040';
+                        e.currentTarget.style.borderColor = '#666';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#333';
+                        e.currentTarget.style.borderColor = '#555';
+                      }}
+                    >
+                      {item.thumbnail ? (
+                        <img 
+                          src={item.thumbnail} 
+                          alt={item.name}
+                          style={{
+                            width: '100%',
+                            height: '60px',
+                            objectFit: 'cover',
+                            borderRadius: '4px',
+                            background: '#222'
+                          }}
+                        />
+                      ) : (
+                        <div style={{ 
+                          fontSize: '24px',
                           width: '100%',
                           height: '60px',
-                          objectFit: 'cover',
-                          borderRadius: '4px',
-                          background: '#222'
-                        }}
-                      />
-                    ) : (
-                      <div style={{ 
-                        fontSize: '24px',
-                        width: '100%',
-                        height: '60px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: '#222',
-                        borderRadius: '4px'
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: '#222',
+                          borderRadius: '4px'
+                        }}>
+                          {getMediaTypeIcon(item)}
+                        </div>
+                      )}
+                      <div style={{
+                        fontSize: '11px',
+                        color: '#ccc',
+                        textAlign: 'center',
+                        wordBreak: 'break-word',
+                        lineHeight: '1.2'
                       }}>
-                        {getMediaTypeIcon(item)}
+                        {item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name}
                       </div>
-                    )}
-                    <div style={{
-                      fontSize: '11px',
-                      color: '#ccc',
-                      textAlign: 'center',
-                      wordBreak: 'break-word',
-                      lineHeight: '1.2'
-                    }}>
-                      {item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name}
+                      <div style={{
+                        fontSize: '10px',
+                        color: '#999',
+                        textAlign: 'center'
+                      }}>
+                        {item.duration ? `${item.duration.toFixed(1)}s` : 'Static'}
+                      </div>
                     </div>
-                    <div style={{
-                      fontSize: '10px',
-                      color: '#999',
-                      textAlign: 'center'
-                    }}>
-                      {item.duration ? `${item.duration.toFixed(1)}s` : 'Static'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            height: '1px',
+            background: '#444',
+            margin: '0'
+          }} />
+
+          {/* Bottom Half - Tenor Search */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0
+          }}>
+            <TenorSearch onStickerSelect={handleTenorGifSelect} />
           </div>
         </div>
 
         {/* Canvas and Timeline Area */}
-        <div className="canvas-timeline-area" style={{ 
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '10px', 
           flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '10px'
+          minHeight: 0 
         }}>
           <VideoCanvas
             mediaItems={mediaItems}

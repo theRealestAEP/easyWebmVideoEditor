@@ -21,6 +21,8 @@ const Timeline = ({
   const [contextMenu, setContextMenu] = useState(null); // Right-click context menu
   const [dragTargetTrack, setDragTargetTrack] = useState(null); // Track being targeted during drag
   const audioElements = useRef(new Map()); // Store audio elements for playback
+  const dragStartMouseX = useRef(null); // Store mouse X when multi-select drag starts
+  const dragStartPositions = useRef(new Map()); // Store original positions when multi-select drag starts
 
   // Playback timer
   useEffect(() => {
@@ -150,11 +152,17 @@ const Timeline = ({
     const clickX = e.clientX - rect.left;
     const newTime = Math.max(0, Math.min(duration, clickX / scale));
     onTimeUpdate(newTime);
+    
+    // Deselect all items when clicking on empty timeline
+    setSelectedItems(new Set());
   }, [scale, duration, onTimeUpdate, isDragging]);
 
   // Handle drop from source media
   const handleTimelineDrop = useCallback((e) => {
     e.preventDefault();
+    
+    // Deselect all items when dropping new media
+    setSelectedItems(new Set());
     
     try {
       const droppedData = e.dataTransfer.getData('text/plain');
@@ -220,6 +228,24 @@ const Timeline = ({
     sortedAudioItems.forEach(item => {
       const itemEnd = item.startTime + item.duration;
       
+      // Handle forced track assignments for audio items
+      if (item.forceTrackIndex !== undefined) {
+        const targetTrack = item.forceTrackIndex;
+        
+        // Only assign to audio track range (0 to audioItems.length - 1)
+        // If trying to force to a video track area, let it fall through to normal assignment
+        const maxAudioTrackIndex = Math.max(audioItems.length - 1, 0);
+        if (targetTrack <= maxAudioTrackIndex) {
+          // Ensure we have enough audio tracks
+          while (audioTracks.length <= targetTrack) {
+            audioTracks.push([]);
+          }
+          
+          audioTracks[targetTrack].push({ ...item, trackIndex: targetTrack, trackType: 'audio', forceTrackIndex: undefined });
+          return;
+        }
+      }
+      
       // Find the first audio track where this item fits without overlap
       let assignedTrack = -1;
       for (let trackIndex = 0; trackIndex < audioTracks.length; trackIndex++) {
@@ -241,7 +267,7 @@ const Timeline = ({
         audioTracks.push([]);
       }
       
-      audioTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'audio' });
+      audioTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'audio', forceTrackIndex: undefined });
     });
     
     // Process video items
@@ -253,13 +279,19 @@ const Timeline = ({
       if (item.forceTrackIndex !== undefined) {
         const targetTrack = item.forceTrackIndex;
         
-        // Ensure we have enough video tracks
-        while (videoTracks.length <= targetTrack) {
-          videoTracks.push([]);
-        }
+        // Convert absolute track index to video track index (subtract audio tracks)
+        const videoTrackIndex = targetTrack - audioTracks.length;
         
-        videoTracks[targetTrack].push({ ...item, trackIndex: targetTrack, trackType: 'video' });
-        return;
+        // Only assign if targeting video track area (after audio tracks)
+        if (videoTrackIndex >= 0) {
+          // Ensure we have enough video tracks
+          while (videoTracks.length <= videoTrackIndex) {
+            videoTracks.push([]);
+          }
+          
+          videoTracks[videoTrackIndex].push({ ...item, trackIndex: videoTrackIndex, trackType: 'video', forceTrackIndex: undefined });
+          return;
+        }
       }
       
       // Find the first video track where this item fits without TIME overlap (not track overlap)
@@ -283,12 +315,33 @@ const Timeline = ({
         videoTracks.push([]);
       }
       
-      videoTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'video' });
+      videoTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'video', forceTrackIndex: undefined });
     });
     
-    console.log('Track assignments - Audio tracks:', audioTracks.length, 'Video tracks:', videoTracks.length);
+    // Clean up empty tracks and reorganize
+    const cleanedAudioTracks = audioTracks.filter(track => track.length > 0);
+    const cleanedVideoTracks = videoTracks.filter(track => track.length > 0);
     
-    return { audioTracks, videoTracks };
+    // Update track indices after cleanup
+    cleanedAudioTracks.forEach((track, trackIndex) => {
+      track.forEach(item => {
+        item.trackIndex = trackIndex;
+        // Clear forceTrackIndex after assignment
+        delete item.forceTrackIndex;
+      });
+    });
+    
+    cleanedVideoTracks.forEach((track, trackIndex) => {
+      track.forEach(item => {
+        item.trackIndex = trackIndex;
+        // Clear forceTrackIndex after assignment
+        delete item.forceTrackIndex;
+      });
+    });
+    
+    console.log('Track assignments - Audio tracks:', cleanedAudioTracks.length, 'Video tracks:', cleanedVideoTracks.length);
+    
+    return { audioTracks: cleanedAudioTracks, videoTracks: cleanedVideoTracks };
   }, []);
 
   // Get track assignments for current media items
@@ -308,8 +361,8 @@ const Timeline = ({
     setDragItem(item);
     setDragOffset(mouseX - itemLeft);
     
-    // Handle multi-select with Ctrl/Cmd
-    if (e.ctrlKey || e.metaKey) {
+    // Handle multi-select with Shift (not Ctrl)
+    if (e.shiftKey) {
       setSelectedItems(prev => {
         const newSet = new Set(prev);
         if (newSet.has(item.id)) {
@@ -320,7 +373,17 @@ const Timeline = ({
         return newSet;
       });
     } else {
-      setSelectedItems(new Set([item.id]));
+      // If clicking on an already selected item (without Shift), maintain the multi-selection for dragging
+      // If clicking on a non-selected item, select only that item
+      setSelectedItems(prev => {
+        if (prev.has(item.id) && prev.size > 1) {
+          // Item is already selected and part of multi-selection, keep the current selection
+          return prev;
+        } else {
+          // Item is not selected or is the only selected item, select only this item
+          return new Set([item.id]);
+        }
+      });
     }
   }, [scale, lockedTracks]);
 
@@ -331,6 +394,116 @@ const Timeline = ({
     const rect = timelineRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
+    
+    // Check if we're doing multi-select drag
+    const isMultiSelectDrag = selectedItems.has(dragItem.id) && selectedItems.size > 1;
+    
+    if (isMultiSelectDrag) {
+      // Multi-select drag: simple mouse-based movement
+      const selectedItemsList = mediaItems.filter(item => selectedItems.has(item.id));
+      
+      // Store the mouse position from when drag started (we need to track this)
+      if (!dragStartMouseX.current) {
+        dragStartMouseX.current = mouseX;
+        dragStartPositions.current = new Map();
+        selectedItemsList.forEach(item => {
+          dragStartPositions.current.set(item.id, item.startTime);
+        });
+      }
+      
+      // Calculate how much mouse moved since drag started
+      const mouseDelta = mouseX - dragStartMouseX.current;
+      const timeDelta = mouseDelta / scale;
+      
+      // Don't allow any selected item to go negative
+      if (selectedItemsList.some(item => {
+        const originalTime = dragStartPositions.current.get(item.id);
+        return originalTime + timeDelta < 0;
+      })) {
+        return;
+      }
+      
+      // Check collision - same track only
+      const nonSelectedItems = mediaItems.filter(item => !selectedItems.has(item.id));
+      const currentTrackAssignments = calculateTrackAssignments(mediaItems);
+      
+      const wouldCollide = selectedItemsList.some(selectedItem => {
+        const originalTime = dragStartPositions.current.get(selectedItem.id);
+        const newItemTime = originalTime + timeDelta;
+        const newItemEnd = newItemTime + selectedItem.duration;
+        
+        // Find track
+        let selectedTrack = -1;
+        let selectedType = '';
+        
+        currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+          if (track.some(item => item.id === selectedItem.id)) {
+            selectedTrack = trackIndex;
+            selectedType = 'audio';
+          }
+        });
+        
+        if (selectedType === '') {
+          currentTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+            if (track.some(item => item.id === selectedItem.id)) {
+              selectedTrack = trackIndex;
+              selectedType = 'video';
+            }
+          });
+        }
+        
+        return nonSelectedItems.some(nonSelectedItem => {
+          let nonSelectedTrack = -1;
+          let nonSelectedType = '';
+          
+          currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+            if (track.some(item => item.id === nonSelectedItem.id)) {
+              nonSelectedTrack = trackIndex;
+              nonSelectedType = 'audio';
+            }
+          });
+          
+          if (nonSelectedType === '') {
+            currentTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+              if (track.some(item => item.id === nonSelectedItem.id)) {
+                nonSelectedTrack = trackIndex;
+                nonSelectedType = 'video';
+              }
+            });
+          }
+          
+          if (selectedType !== nonSelectedType || selectedTrack !== nonSelectedTrack) {
+            return false;
+          }
+          
+          const nonSelectedEnd = nonSelectedItem.startTime + nonSelectedItem.duration;
+          return !(newItemTime >= nonSelectedEnd || newItemEnd <= nonSelectedItem.startTime);
+        });
+      });
+      
+      if (wouldCollide) {
+        return;
+      }
+      
+      // Move all selected items to their new positions
+      const updatedItems = mediaItems.map(item => {
+        if (!selectedItems.has(item.id)) {
+          return item;
+        }
+        
+        const originalTime = dragStartPositions.current.get(item.id);
+        const newItemTime = Math.max(0, originalTime + timeDelta);
+        return {
+          ...item,
+          startTime: Math.round(newItemTime * 10) / 10
+        };
+      });
+      
+      onItemsUpdate(updatedItems);
+      return;
+    }
+    
+    // Single item drag - RESTORE ORIGINAL LOGIC
     const newStartTime = Math.max(0, (mouseX - dragOffset) / scale);
     
     // Calculate which track the mouse is over
@@ -361,18 +534,6 @@ const Timeline = ({
       (isInAudioTrackArea || isNewTrackArea) : 
       (!isInAudioTrackArea || isNewTrackArea);
     
-    console.log('Drag info:', {
-      targetTrackIndex,
-      totalExistingTracks,
-      isNewTrackArea,
-      isDraggingAudio,
-      audioTrackCount,
-      isInAudioTrackArea,
-      isValidTrackType,
-      mouseYInTracks,
-      trackHeight
-    });
-    
     // Set drag target for visual feedback
     if (targetTrackIndex >= 0) {
       setDragTargetTrack({
@@ -389,71 +550,98 @@ const Timeline = ({
     
     // Only do overlap prevention if not dragging to a new track area and in valid track type
     if (!isNewTrackArea && isValidTrackType) {
-      // For visual media on existing video tracks, allow placement if no time overlap
-      // For audio, still check for overlaps within audio tracks
-      const sameTypeItems = otherItems.filter(item => 
-        isDraggingAudio ? item.type === 'audio' : item.type !== 'audio'
-      );
+      // Get items that would be on the same track as our target
+      let sameTrackItems = [];
+      
+      if (isDraggingAudio && isInAudioTrackArea) {
+        // For audio items, check against items on the specific audio track
+        const targetAudioTrackIndex = targetTrackIndex;
+        if (targetAudioTrackIndex < currentTrackAssignments.audioTracks.length) {
+          sameTrackItems = currentTrackAssignments.audioTracks[targetAudioTrackIndex];
+        }
+      } else if (!isDraggingAudio && !isInAudioTrackArea) {
+        // For video items, check against items on the specific video track
+        const targetVideoTrackIndex = targetTrackIndex - audioTrackCount;
+        if (targetVideoTrackIndex >= 0 && targetVideoTrackIndex < currentTrackAssignments.videoTracks.length) {
+          sameTrackItems = currentTrackAssignments.videoTracks[targetVideoTrackIndex];
+        }
+      }
       
       const dragItemEnd = snappedTime + dragItem.duration;
       
-      // Check for time overlaps
-      const hasTimeOverlap = sameTypeItems.some(item => {
+      // Check for time overlaps only with items on the same track
+      const hasTimeOverlap = sameTrackItems.some(item => {
         const itemEnd = item.startTime + item.duration;
         return !(snappedTime >= itemEnd || dragItemEnd <= item.startTime);
       });
       
-      // If dragging visual media to an existing video track, allow it if no time overlap
-      if (!isDraggingAudio && !isInAudioTrackArea && !hasTimeOverlap) {
-        // Visual media can be placed on existing video tracks without time conflicts
-        finalTime = snappedTime;
-      }
-      // If there's a time overlap, try to find the closest non-overlapping position
-      else if (hasTimeOverlap) {
-        // Find the nearest gap among same-type items
-        const gaps = [];
+      // If there's an overlap, find the nearest valid position (NOT bounce back)
+      if (hasTimeOverlap) {
+        const sortedItems = sameTrackItems.sort((a, b) => a.startTime - b.startTime);
         
-        // Add gap at the beginning
-        if (sameTypeItems.length > 0) {
-          gaps.push({ start: 0, end: Math.min(...sameTypeItems.map(item => item.startTime)) });
-        } else {
-          gaps.push({ start: 0, end: Infinity });
-        }
+        // Find all valid positions and choose the closest one
+        const validPositions = [];
         
-        // Add gaps between items
-        const sortedItems = sameTypeItems.sort((a, b) => a.startTime - b.startTime);
-        for (let i = 0; i < sortedItems.length - 1; i++) {
-          const currentEnd = sortedItems[i].startTime + sortedItems[i].duration;
-          const nextStart = sortedItems[i + 1].startTime;
-          if (nextStart > currentEnd) {
-            gaps.push({ start: currentEnd, end: nextStart });
-          }
-        }
-        
-        // Add gap at the end
-        const lastItem = sortedItems[sortedItems.length - 1];
-        if (lastItem) {
-          gaps.push({ start: lastItem.startTime + lastItem.duration, end: Infinity });
-        }
-        
-        // Find the best gap that fits our item
-        const validGaps = gaps.filter(gap => gap.end - gap.start >= dragItem.duration);
-        if (validGaps.length > 0) {
-          // Choose the gap closest to the desired position
-          const bestGap = validGaps.reduce((best, gap) => {
-            const gapDistance = Math.abs(gap.start - snappedTime);
-            const bestDistance = Math.abs(best.start - snappedTime);
-            return gapDistance < bestDistance ? gap : best;
+        // Option 1: Place at the end of each existing item (side by side)
+        sortedItems.forEach(item => {
+          const afterItemPosition = item.startTime + item.duration;
+          
+          // Check if this position would conflict with any other item
+          const wouldConflict = sortedItems.some(otherItem => {
+            if (otherItem.id === item.id) return false; // Skip the same item
+            const dragEnd = afterItemPosition + dragItem.duration;
+            const otherEnd = otherItem.startTime + otherItem.duration;
+            return !(afterItemPosition >= otherEnd || dragEnd <= otherItem.startTime);
           });
-          finalTime = bestGap.start;
-        } else {
-          // No gap fits, place at the end
-          const lastEndTime = Math.max(...sameTypeItems.map(item => item.startTime + item.duration), 0);
-          finalTime = lastEndTime;
+          
+          if (!wouldConflict) {
+            validPositions.push({
+              position: afterItemPosition,
+              distance: Math.abs(afterItemPosition - snappedTime)
+            });
+          }
+        });
+        
+        // Option 2: Place before existing items if there's space
+        sortedItems.forEach(item => {
+          const beforeItemPosition = item.startTime - dragItem.duration;
+          if (beforeItemPosition >= 0) {
+            
+            // Check if this position would conflict with any other item
+            const wouldConflict = sortedItems.some(otherItem => {
+              if (otherItem.id === item.id) return false; // Skip the same item
+              const dragEnd = beforeItemPosition + dragItem.duration;
+              const otherEnd = otherItem.startTime + otherItem.duration;
+              return !(beforeItemPosition >= otherEnd || dragEnd <= otherItem.startTime);
+            });
+            
+            if (!wouldConflict) {
+              validPositions.push({
+                position: beforeItemPosition,
+                distance: Math.abs(beforeItemPosition - snappedTime)
+              });
+            }
+          }
+        });
+        
+        // Option 3: Place at the very end of all items if no other valid position
+        if (validPositions.length === 0) {
+          const lastEndTime = Math.max(...sortedItems.map(item => item.startTime + item.duration));
+          validPositions.push({
+            position: lastEndTime,
+            distance: Math.abs(lastEndTime - snappedTime)
+          });
+        }
+        
+        // Choose the position with minimum distance
+        if (validPositions.length > 0) {
+          const bestOption = validPositions.reduce((best, current) => 
+            current.distance < best.distance ? current : best
+          );
+          finalTime = bestOption.position;
         }
       }
     }
-    // For new track areas or invalid track types, we use finalTime = snappedTime (no overlap prevention)
     
     // Update the item position
     const updatedItems = mediaItems.map(item => 
@@ -461,16 +649,14 @@ const Timeline = ({
         ? { 
             ...item, 
             startTime: finalTime,
-            // If dragging to a new track area, preserve the track preference
-            forceTrackIndex: isNewTrackArea ? targetTrackIndex : undefined
+            // Set forceTrackIndex for both new track areas AND existing tracks
+            forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
           }
         : item
     );
     
-    console.log('Updated item:', updatedItems.find(item => item.id === dragItem.id));
-    
     onItemsUpdate(updatedItems);
-  }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments]);
+  }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems]);
 
   // Handle mouse up
   const handleMouseUp = useCallback(() => {
@@ -478,8 +664,21 @@ const Timeline = ({
     setDragItem(null);
     setDragOffset(0);
     setDragTargetTrack(null); // Clear drag target
+    // Clear multi-select drag refs
+    dragStartMouseX.current = null;
+    dragStartPositions.current.clear();
     // Don't automatically close context menu on mouse up
   }, []);
+
+  // Handle timeline tracks click for deselection
+  const handleTracksClick = useCallback((e) => {
+    // Only deselect if clicking on the tracks area itself, not on an item
+    // Also check if we're not currently dragging to avoid deselecting during drag operations
+    if (!isDragging && (e.target.classList.contains('timeline-tracks') || 
+        e.target.classList.contains('timeline-track'))) {
+      setSelectedItems(new Set());
+    }
+  }, [isDragging]);
 
   // Handle mouse wheel for zooming
   const handleWheel = useCallback((e) => {
@@ -752,6 +951,7 @@ const Timeline = ({
       <div className="timeline-tracks" style={{ minHeight: '200px', background: '#1a1a1a', position: 'relative' }}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
+        onClick={handleTracksClick}
       >
         {/* Left edge gradient overlay */}
         <div style={{
@@ -774,7 +974,8 @@ const Timeline = ({
               height: '60px',
               borderBottom: '1px solid #444',
               position: 'relative',
-              backgroundColor: 'rgba(255, 107, 107, 0.05)' // Slight red tint for audio tracks
+              backgroundColor: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                              'rgba(74, 144, 226, 0.1)' : 'rgba(255, 107, 107, 0.05)' // Slight red tint for audio tracks
             }}
           >
             {/* Track label */}
@@ -819,6 +1020,7 @@ const Timeline = ({
                   }}
                   onMouseDown={(e) => handleItemMouseDown(e, item)}
                   onContextMenu={(e) => handleContextMenu(e, item)}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <span style={{ 
                     whiteSpace: 'nowrap', 
@@ -889,6 +1091,7 @@ const Timeline = ({
                   }}
                   onMouseDown={(e) => handleItemMouseDown(e, item)}
                   onContextMenu={(e) => handleContextMenu(e, item)}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <span style={{ 
                     whiteSpace: 'nowrap', 
@@ -974,7 +1177,7 @@ const Timeline = ({
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={duplicateSelectedItems}
           >
-            📄 Duplicate (Ctrl+D)
+            📋 Duplicate (Ctrl+D)
           </div>
           <div 
             style={{ padding: '8px 16px', cursor: 'pointer', color: '#fff' }}

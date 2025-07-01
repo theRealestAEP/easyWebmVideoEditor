@@ -27,6 +27,35 @@ const VideoCanvas = ({
   const mediaProcessors = useRef(new Map()); // Frame-based processors
   const animationFrame = useRef();
   const isModifyingObject = useRef(false); // Flag to prevent updates during modifications
+  const lastUpdateTime = useRef(Date.now());
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Detect rapid updates (drag operations)
+  useEffect(() => {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastUpdateTime.current;
+    lastUpdateTime.current = now;
+    
+    if (timeSinceLastUpdate < 100) {
+      setIsDragging(true);
+      
+      const resetTimer = setTimeout(() => {
+        setIsDragging(false);
+      }, 200);
+      
+      return () => clearTimeout(resetTimer);
+    }
+  }, [mediaItems]);
+
+  // Force canvas refresh when dragging ends
+  useEffect(() => {
+    if (!isDragging && fabricCanvas.current) {
+      console.log('Dragging ended - force canvas refresh');
+      // Clear all objects and let the main update effect repopulate
+      fabricCanvas.current.clear();
+      fabricObjects.current.clear();
+    }
+  }, [isDragging]);
 
   // Update queue status periodically
   useEffect(() => {
@@ -117,6 +146,8 @@ const VideoCanvas = ({
         return null; // Hide media when it's outside its duration
       }
       
+      // Clamp relativeTime to valid bounds for timeline operations
+      const clampedTime = Math.max(0, Math.min(relativeTime, processor.duration - 0.1));
       const frame = processor.getCurrentFrame(relativeTime);
       if (!frame) {
         console.log('No frame available for:', item.name, 'at time:', relativeTime);
@@ -322,7 +353,8 @@ const VideoCanvas = ({
   useEffect(() => {
     if (!fabricCanvas.current) return;
     
-    // Skip updates if user is currently modifying objects
+    // Skip updates if user is currently modifying objects ON THE CANVAS
+    // But allow updates during timeline drag operations
     if (isModifyingObject.current) {
       console.log('Skipping canvas update - object being modified');
       return;
@@ -332,7 +364,9 @@ const VideoCanvas = ({
     
     // Filter out audio items and filter active items based on ACTUAL processor durations
     const visualMediaItems = mediaItems.filter(item => item.type !== 'audio');
-    const activeItems = visualMediaItems.filter(item => {
+    
+    // Show all visual items during timeline operations for immediate updates
+    const activeItems = isDragging ? visualMediaItems : visualMediaItems.filter(item => {
       const processor = mediaProcessors.current.get(item.id);
       const actualDuration = processor ? processor.duration : item.duration;
       
@@ -357,7 +391,10 @@ const VideoCanvas = ({
         // Check if processor says it's visible
         const isVisibleByProcessor = processor ? processor.isVisibleAtTime(relativeTime) : true;
         
-        const shouldRemove = !isInTimeBounds || !isVisibleByProcessor;
+        // Check if item still exists in current mediaItems
+        const stillExists = visualMediaItems.some(item => item.id === obj.mediaItem.id);
+        
+        const shouldRemove = isDragging ? !stillExists : (!stillExists || !isInTimeBounds || !isVisibleByProcessor);
         
         if (shouldRemove) {
           console.log('Removing object:', obj.mediaItem.name, 
@@ -378,12 +415,6 @@ const VideoCanvas = ({
       
       if (!processor) {
         console.warn('No processor found for:', item.name, '- still processing...');
-        return;
-      }
-
-      // Double-check visibility with processor
-      if (!processor.isVisibleAtTime(relativeTime)) {
-        console.log('Media not visible at time:', item.name, 'relativeTime:', relativeTime, 'duration:', processor.duration);
         return;
       }
 
@@ -444,6 +475,9 @@ const VideoCanvas = ({
             existingObject._userModified = true;
             existingObject._lastModified = lastModified;
           }
+          
+          // Force immediate canvas render to prevent artifacts during drag
+          canvas.renderAll();
           
           // Update frame for animated media with scaled PNG
           if (processor.isAnimated && frameImg.src) {
@@ -518,7 +552,22 @@ const VideoCanvas = ({
       }
     });
 
-  }, [mediaItems, currentTime, selectedItem, getCurrentFrameImage]);
+    // Final cleanup and canvas render
+    canvas.renderAll();
+    
+    // During drag operations, force additional cleanup
+    if (isDragging) {
+      // Clear any cached rendering to prevent artifacts
+      canvas.getObjects().forEach(obj => {
+        if (obj.mediaItem) {
+          obj.dirty = true;
+        }
+      });
+      // Force another render for drag operations
+      setTimeout(() => canvas.renderAll(), 0);
+    }
+
+  }, [mediaItems, currentTime, selectedItem, getCurrentFrameImage, isDragging]);
 
   // Animation loop for smooth frame updates during playback
   useEffect(() => {
@@ -609,7 +658,7 @@ const VideoCanvas = ({
     
     const container = containerRef.current;
     const containerWidth = container.clientWidth - 40;
-    const containerHeight = container.clientHeight - 40;
+    const containerHeight = container.clientHeight - 80; // Reserve 80px for timeline
     
     const scaleX = containerWidth / CANVAS_WIDTH;
     const scaleY = containerHeight / CANVAS_HEIGHT;
@@ -671,8 +720,8 @@ const VideoCanvas = ({
           height={CANVAS_HEIGHT}
           style={{
             display: 'block',
-            width: CANVAS_WIDTH,
-            height: CANVAS_HEIGHT,
+            width: displaySize.width,
+            height: displaySize.height,
           }}
         />
         
