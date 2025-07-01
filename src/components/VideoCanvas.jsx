@@ -8,18 +8,27 @@ const VideoCanvas = ({
   isPlaying, 
   selectedItem, 
   onItemSelect, 
-  onItemUpdate 
+  onItemUpdate,
+  canvasWidth = 1920,
+  canvasHeight = 1080,
+  exportMode = false
 }) => {
   const canvasRef = useRef();
   const fabricCanvas = useRef();
   const containerRef = useRef();
   const mediaProcessor = useRef(new MediaProcessor());
   
-  // Fixed canvas dimensions (1920x1080)
-  const CANVAS_WIDTH = 1920;
-  const CANVAS_HEIGHT = 1080;
+  // Canvas dimensions from props
+  const CANVAS_WIDTH = canvasWidth;
+  const CANVAS_HEIGHT = canvasHeight;
   
-  const [displaySize, setDisplaySize] = useState({ width: 800, height: 450 });
+  const [displaySize, setDisplaySize] = useState(() => {
+    // Calculate initial display size maintaining aspect ratio
+    const canvasAspectRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+    const baseWidth = 800; // Base width for initial display
+    const calculatedHeight = baseWidth / canvasAspectRatio;
+    return { width: baseWidth, height: calculatedHeight };
+  });
   const [scale, setScale] = useState(1);
   const [processingStatus, setProcessingStatus] = useState('');
   const [queueStatus, setQueueStatus] = useState({ queueLength: 0, isProcessing: false, totalInProgress: 0 });
@@ -29,6 +38,7 @@ const VideoCanvas = ({
   const isModifyingObject = useRef(false); // Flag to prevent updates during modifications
   const lastUpdateTime = useRef(Date.now());
   const [isDragging, setIsDragging] = useState(false);
+  const previousCanvasDimensions = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
 
   // Detect rapid updates (drag operations)
   useEffect(() => {
@@ -219,7 +229,8 @@ const VideoCanvas = ({
       height: CANVAS_HEIGHT,
       backgroundColor: 'rgba(0,0,0,0)',
       selection: true,
-      preserveObjectStacking: true
+      preserveObjectStacking: true,
+      interactive: true
     });
 
     const canvas = fabricCanvas.current;
@@ -331,6 +342,38 @@ const VideoCanvas = ({
       fabricObjects.current.clear();
     };
   }, [onItemSelect, onItemUpdate]);
+
+  // Handle export mode changes
+  useEffect(() => {
+    if (fabricCanvas.current) {
+      const canvas = fabricCanvas.current;
+      
+      // Clear any active selections when entering export mode
+      if (exportMode) {
+        canvas.discardActiveObject();
+      }
+      
+      // Update all existing objects with new export mode settings
+      canvas.getObjects().forEach(obj => {
+        obj.set({
+          selectable: !exportMode,
+          hasControls: !exportMode,
+          hasBorders: !exportMode,
+          hasRotatingPoint: !exportMode,
+          evented: !exportMode
+        });
+      });
+      
+      // Update canvas-level settings
+      canvas.selection = !exportMode;
+      canvas.interactive = !exportMode;
+      
+      // Force re-render
+      canvas.renderAll();
+      
+      console.log('Canvas updated for export mode:', exportMode, 'Objects:', canvas.getObjects().length);
+    }
+  }, [exportMode]);
 
   // Process all media items when they change
   useEffect(() => {
@@ -454,7 +497,13 @@ const VideoCanvas = ({
             left: item.x,
             top: item.y,
             angle: item.rotation,
-            opacity: item.opacity
+            opacity: item.opacity,
+            // Update UI controls based on export mode
+            selectable: !exportMode,
+            hasControls: !exportMode,
+            hasBorders: !exportMode,
+            hasRotatingPoint: !exportMode,
+            evented: !exportMode
           };
           
           // For PNG scaling, we always want the object to match the item size
@@ -515,10 +564,11 @@ const VideoCanvas = ({
               opacity: item.opacity,
               scaleX: 1,
               scaleY: 1,
-              selectable: true,
-              hasControls: true,
-              hasBorders: true,
-              hasRotatingPoint: true
+              selectable: !exportMode,
+              hasControls: !exportMode,
+              hasBorders: !exportMode,
+              hasRotatingPoint: !exportMode,
+              evented: !exportMode
             });
             
             fabricObject.mediaItem = item;
@@ -526,8 +576,8 @@ const VideoCanvas = ({
             canvas.add(fabricObject);
             fabricObjects.current.set(item.id, fabricObject);
             
-            // Select if needed
-            if (selectedItem && selectedItem.id === item.id) {
+            // Handle selection only when not in export mode
+            if (!exportMode && selectedItem && selectedItem.id === item.id) {
               canvas.setActiveObject(fabricObject);
             }
             
@@ -568,6 +618,23 @@ const VideoCanvas = ({
     }
 
   }, [mediaItems, currentTime, selectedItem, getCurrentFrameImage, isDragging]);
+
+  // Update display size when canvas dimensions change
+  useEffect(() => {
+    // Calculate initial display size maintaining aspect ratio
+    const canvasAspectRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+    const baseWidth = 800; // Base width for initial display
+    const calculatedHeight = baseWidth / canvasAspectRatio;
+    const newDisplaySize = { width: baseWidth, height: calculatedHeight };
+    
+    setDisplaySize(newDisplaySize);
+    setScale(newDisplaySize.width / CANVAS_WIDTH);
+    
+    // Trigger a resize to recalculate properly
+    setTimeout(() => {
+      handleResize();
+    }, 0);
+  }, [CANVAS_WIDTH, CANVAS_HEIGHT]);
 
   // Animation loop for smooth frame updates during playback
   useEffect(() => {
@@ -654,26 +721,56 @@ const VideoCanvas = ({
 
   // Handle canvas resize and scaling
   const handleResize = useCallback(() => {
-    if (!containerRef.current || !fabricCanvas.current) return;
+    if (!containerRef.current) return;
     
     const container = containerRef.current;
-    const containerWidth = container.clientWidth - 40;
-    const containerHeight = container.clientHeight - 80; // Reserve 80px for timeline
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
     
-    const scaleX = containerWidth / CANVAS_WIDTH;
-    const scaleY = containerHeight / CANVAS_HEIGHT;
-    const newScale = Math.min(scaleX, scaleY, 1);
+    // Reserve space for timeline (reduced from 190px to 80px)
+    const reservedTimelineSpace = 80;
+    const availableHeight = containerHeight - reservedTimelineSpace;
+    const availableWidth = containerWidth;
     
-    const newDisplayWidth = CANVAS_WIDTH * newScale;
-    const newDisplayHeight = CANVAS_HEIGHT * newScale;
+    // Calculate the aspect ratio of the canvas
+    const canvasAspectRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+    const availableAspectRatio = availableWidth / availableHeight;
     
-    setDisplaySize({ width: newDisplayWidth, height: newDisplayHeight });
+    let displayWidth, displayHeight;
+    
+    // Fit canvas to available space while maintaining aspect ratio
+    if (canvasAspectRatio > availableAspectRatio) {
+      // Canvas is wider than available space - constrain by width
+      displayWidth = availableWidth;
+      displayHeight = availableWidth / canvasAspectRatio;
+    } else {
+      // Canvas is taller than available space - constrain by height
+      displayHeight = availableHeight;
+      displayWidth = availableHeight * canvasAspectRatio;
+    }
+    
+    // Calculate scale based on the display dimensions
+    const scaleX = displayWidth / CANVAS_WIDTH;
+    const scaleY = displayHeight / CANVAS_HEIGHT;
+    const newScale = Math.min(scaleX, scaleY);
+    
+    setDisplaySize({ width: displayWidth, height: displayHeight });
     setScale(newScale);
     
-    fabricCanvas.current.setZoom(newScale);
-    fabricCanvas.current.setWidth(newDisplayWidth);
-    fabricCanvas.current.setHeight(newDisplayHeight);
-  }, []);
+    // Update Fabric.js canvas if it exists
+    if (fabricCanvas.current) {
+      fabricCanvas.current.setZoom(newScale);
+      fabricCanvas.current.setWidth(displayWidth);
+      fabricCanvas.current.setHeight(displayHeight);
+    }
+    
+    // console.log('Canvas resize:', {
+    //   canvasDimensions: `${CANVAS_WIDTH}x${CANVAS_HEIGHT}`,
+    //   availableSpace: `${availableWidth}x${availableHeight}`,
+    //   displaySize: `${displayWidth}x${displayHeight}`,
+    //   scale: newScale
+    // });
+  }, [CANVAS_WIDTH, CANVAS_HEIGHT]);
 
   useEffect(() => {
     handleResize();
@@ -775,7 +872,7 @@ const VideoCanvas = ({
           fontSize: '11px',
           pointerEvents: 'none'
         }}>
-          Frame-Based Media System: All formats normalized to PNG sequences
+          Canvas: {CANVAS_WIDTH}x{CANVAS_HEIGHT} • Frame-Based Media System
         </div>
       </div>
       

@@ -30,7 +30,7 @@ export class VideoComposer {
     }
   }
 
-  async exportVideo({ mediaItems, duration, width = 1920, height = 1080, fps = 15, onProgress }) {
+  async exportVideo({ mediaItems, duration, width = 1920, height = 1080, fps = 15, onProgress, onTimelineSeek }) {
     try {
       // Ensure onProgress is callable
       const safeOnProgress = typeof onProgress === 'function' ? onProgress : () => {};
@@ -45,59 +45,39 @@ export class VideoComposer {
       if (!mediaItems || mediaItems.length === 0) {
         throw new Error('No media items to export');
       }
+      if (!onTimelineSeek || typeof onTimelineSeek !== 'function') {
+        throw new Error('Timeline seek callback is required for canvas capture export');
+      }
       
-      safeOnProgress(5, 'Processing media items...');
+      safeOnProgress(5, 'Setting up canvas capture...');
 
       // Filter out audio items for video processing
-      const visualMediaItems = mediaItems.filter(item => item.type !== 'audio');
       const audioItems = mediaItems.filter(item => item.type === 'audio');
 
-      console.log('🎬 Starting Canvas-based export:', {
+      console.log('🎬 Starting Canvas Capture Export:', {
         totalItems: mediaItems.length,
-        visualItems: visualMediaItems.length,
         audioItems: audioItems.length,
         duration,
         dimensions: `${width}x${height}`,
         fps
       });
 
-      // Process all media items and extract their frames
-      const mediaProcessors = new Map();
-      safeOnProgress(10, 'Analyzing media files...');
-      
-      for (let i = 0; i < visualMediaItems.length; i++) {
-        const item = visualMediaItems[i];
-        const progressBase = visualMediaItems.length > 0 ? (i / visualMediaItems.length) * 15 : 0; // Reduced from 20 to 15
-        safeOnProgress(10 + progressBase, `Processing ${item.name}... (${i + 1}/${visualMediaItems.length})`);
-        
-        try {
-          const frameData = await this.mediaProcessor.extractFrames(item, (progress, status) => {
-            const itemProgress = visualMediaItems.length > 0 ? (progress / 100) * (15 / visualMediaItems.length) : 0; // Reduced from 20 to 15
-            safeOnProgress(10 + progressBase + itemProgress, 
-                      `${item.name}: ${status}`);
-          });
-          
-          const processor = this.mediaProcessor.createProcessor(item, frameData);
-          mediaProcessors.set(item.id, processor);
-          console.log(`✅ Processed ${item.name}: ${frameData.frameCount} frames, ${frameData.duration}s`);
-        } catch (error) {
-          console.error(`❌ Failed to process ${item.name}:`, error);
-          // Continue with other items
-        }
+      // Find the existing canvas element from VideoCanvas component
+      const existingCanvas = document.querySelector('canvas.video-canvas');
+      if (!existingCanvas) {
+        throw new Error('No canvas found. Please ensure the video preview is visible during export.');
       }
 
-      safeOnProgress(25, 'Media processing complete. Setting up video recording...');
+      safeOnProgress(10, 'Canvas found, setting up recording...');
 
-      // Create canvas for recording
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-
-      safeOnProgress(27, 'Configuring video encoder...');
+      // Create a new canvas for recording at exact export dimensions
+      const recordingCanvas = document.createElement('canvas');
+      recordingCanvas.width = width;
+      recordingCanvas.height = height;
+      const ctx = recordingCanvas.getContext('2d');
 
       // Setup MediaRecorder with high quality settings
-      const stream = canvas.captureStream(fps);
+      const stream = recordingCanvas.captureStream(fps);
       
       // Try different codec options for best quality
       let mimeType = 'video/webm;codecs=vp9';
@@ -113,7 +93,7 @@ export class VideoComposer {
         videoBitsPerSecond: 8000000 // 8 Mbps for high quality
       });
 
-      safeOnProgress(29, `Using ${mimeType} codec for recording...`);
+      safeOnProgress(15, `Using ${mimeType} codec...`);
 
       const chunks = [];
       recorder.ondataavailable = (e) => {
@@ -145,7 +125,7 @@ export class VideoComposer {
             safeOnProgress(98, 'Creating download link...');
             const url = URL.createObjectURL(finalBlob);
             safeOnProgress(100, 'Export complete! 🎉');
-            console.log('✅ Canvas-based export completed successfully');
+            console.log('✅ Canvas capture export completed successfully');
             resolve({ url, blob: finalBlob });
           } catch (error) {
             reject(error);
@@ -159,119 +139,66 @@ export class VideoComposer {
 
         // Start recording
         recorder.start();
-        safeOnProgress(30, 'Recording video frames...');
+        safeOnProgress(20, 'Recording canvas frames...');
 
         let frameIndex = 0;
-        const totalFrames = Math.max(1, Math.ceil(duration * fps)); // Ensure at least 1 frame
+        const totalFrames = Math.max(1, Math.ceil(duration * fps));
         const timeStep = 1 / fps;
-        let startTime = Date.now();
-        let lastProgressUpdate = 0; // Track last progress percentage to throttle updates
 
         const renderFrame = async () => {
           if (frameIndex >= totalFrames) {
             recorder.stop();
-            safeOnProgress(85, 'Finalizing video...');
+            safeOnProgress(80, 'Finalizing video...');
             return;
           }
 
           const currentTime = frameIndex * timeStep;
           
-          // Clear canvas with transparent background
+          // Update progress more frequently - every frame
+          const progress = 20 + (frameIndex / totalFrames) * 60;
+          safeOnProgress(progress, `Capturing frame ${frameIndex + 1}/${totalFrames}...`);
+          
+          // Use the callback to seek the timeline to the exact time
+          await onTimelineSeek(currentTime);
+          
+          // Minimal delay - just enough for canvas to render
+          await new Promise(resolve => setTimeout(resolve, 16)); // One frame at 60fps
+
+          // Clear recording canvas
           ctx.clearRect(0, 0, width, height);
           
-          // Get active visual items at current time
-          const activeItems = visualMediaItems.filter(item => 
-            currentTime >= item.startTime && 
-            currentTime < item.startTime + item.duration
-          );
-
-          // Render each active item using the frame-based system
-          for (const item of activeItems) {
-            const processor = mediaProcessors.get(item.id);
-            if (!processor) continue;
-
-            const relativeTime = currentTime - item.startTime;
+          // Scale and draw the existing canvas onto our recording canvas
+          const sourceWidth = existingCanvas.width;
+          const sourceHeight = existingCanvas.height;
             
-            // Check if media should be visible at this time
-            if (!processor.isVisibleAtTime(relativeTime)) continue;
-            
-            try {
-              const frame = processor.getCurrentFrame(relativeTime);
-              if (!frame) continue;
+          // Calculate scaling to fit the export dimensions while maintaining aspect ratio
+          const scaleX = width / sourceWidth;
+          const scaleY = height / sourceHeight;
+          const scale = Math.min(scaleX, scaleY);
+          
+          const scaledWidth = sourceWidth * scale;
+          const scaledHeight = sourceHeight * scale;
+              
+          // Center the scaled canvas
+          const offsetX = (width - scaledWidth) / 2;
+          const offsetY = (height - scaledHeight) / 2;
 
-              // Create image from frame
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              
-              await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('Image load timeout')), 2000);
-                img.onload = () => {
-                  clearTimeout(timeout);
-                  resolve();
-                };
-                img.onerror = () => {
-                  clearTimeout(timeout);
-                  reject(new Error('Image load failed'));
-                };
-                img.src = frame.url;
-              });
-
-              // Apply transformations and render
-              ctx.save();
-              
-              // Set opacity
-              ctx.globalAlpha = item.opacity || 1;
-              
-              // Apply transformations
-              const centerX = item.x + item.width / 2;
-              const centerY = item.y + item.height / 2;
-              
-              ctx.translate(centerX, centerY);
-              ctx.rotate((item.rotation || 0) * Math.PI / 180);
-              ctx.translate(-centerX, -centerY);
-
-              // Draw the frame with scaling
-              ctx.drawImage(img, item.x, item.y, item.width, item.height);
-              
-              ctx.restore();
-            } catch (error) {
-              console.warn(`Failed to render frame ${frameIndex} for ${item.name}:`, error);
-            }
-          }
+          // Draw the canvas content
+          ctx.drawImage(existingCanvas, offsetX, offsetY, scaledWidth, scaledHeight);
 
           frameIndex++;
           
-          // Throttled progress updates - only update every 5% or significant frame intervals
-          const progress = 30 + (frameIndex / totalFrames) * 55;
-          const progressRounded = Math.floor(progress);
-          
-          // Update progress if it's a significant change (every 5%) or every 10 frames minimum
-          if (progressRounded >= lastProgressUpdate + 5 || frameIndex % Math.max(1, Math.floor(totalFrames / 10)) === 0 || frameIndex === totalFrames) {
-            lastProgressUpdate = progressRounded;
-            safeOnProgress(progress, `Recording frame ${frameIndex}/${totalFrames}... (${Math.round(progress)}%)`);
-          }
-          
-          // Use precise timing for frame rate
-          const expectedTime = frameIndex * (1000 / fps);
-          const actualTime = Date.now() - startTime;
-          const delay = Math.max(0, expectedTime - actualTime);
-          
-          setTimeout(renderFrame, delay);
+          // Use the exact same timing as the preview framerate
+          const nextFrameDelay = 1000 / fps;
+          setTimeout(renderFrame, nextFrameDelay);
         };
 
-        // Start rendering
+        // Start the frame capture process
         renderFrame();
       });
 
     } catch (error) {
-      console.error('❌ Canvas export failed:', error);
-      
-      // Enhanced error messages
-      if (error.message.includes('memory access out of bounds') || 
-          error.message.includes('out of memory')) {
-        throw new Error('Export failed due to memory limitations. Try:\n• Reducing video duration to under 30 seconds\n• Using fewer media items\n• Using the fallback export method');
-      }
-      
+      console.error('❌ Canvas capture export failed:', error);
       throw error;
     }
   }
@@ -322,10 +249,10 @@ export class VideoComposer {
     }
   }
 
-  // Fallback export using same Canvas/MediaRecorder method
-  async exportVideoFallback({ mediaItems, duration, width = 1920, height = 1080, fps = 15, onProgress }) {
-    // The fallback is now the same as the main method since we're using Canvas/MediaRecorder
-    // which avoids FFmpeg memory limitations entirely
-    return this.exportVideo({ mediaItems, duration, width, height, fps, onProgress });
+  // Fallback export using same Canvas capture method
+  async exportVideoFallback({ mediaItems, duration, width = 1920, height = 1080, fps = 15, onProgress, onTimelineSeek }) {
+    // The fallback now uses the same canvas capture approach for consistency
+    // This ensures both methods produce identical results
+    return this.exportVideo({ mediaItems, duration, width, height, fps, onProgress, onTimelineSeek });
   }
 } 

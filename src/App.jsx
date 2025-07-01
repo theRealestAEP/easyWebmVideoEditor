@@ -15,6 +15,14 @@ function App() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [sourceMedia, setSourceMedia] = useState([]);
+  const [isExporting, setIsExporting] = useState(false); // Track export state for UI cleanup
+  
+  // Settings state
+  const [settings, setSettings] = useState({
+    canvasWidth: 1920,
+    canvasHeight: 1080,
+    exportFrameRate: 15
+  });
   
   const fileInputRef = useRef();
   const videoComposer = useRef(new VideoComposer());
@@ -95,6 +103,13 @@ function App() {
     e.preventDefault();
     setIsDragOver(false);
     
+    // Check if this is an internal drag from source media - if so, ignore it
+    const isInternalDrag = e.dataTransfer.types.includes('source-media');
+    if (isInternalDrag) {
+      console.log('Ignoring internal source media drag');
+      return;
+    }
+    
     // Check for files first
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
@@ -138,17 +153,41 @@ function App() {
           if (uriData && (uriData.includes('tenor') || uriData.includes('.gif'))) {
             console.log('Found URI data:', uriData);
             
+            // Extract name from Tenor URL if possible
+            let stickerName = 'Tenor Sticker';
+            try {
+              if (uriData.includes('tenor.com')) {
+                const url = new URL(uriData);
+                const pathParts = url.pathname.split('/');
+                
+                if (pathParts.length >= 3) {
+                  const filename = pathParts[pathParts.length - 1];
+                  const nameWithoutExt = filename.split('.')[0];
+                  
+                  if (nameWithoutExt && nameWithoutExt !== 'undefined' && nameWithoutExt.length > 1) {
+                    stickerName = nameWithoutExt
+                      .split('-')
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                      .join(' ');
+                  }
+                }
+              }
+            } catch (error) {
+              console.warn('Failed to extract name from URI:', uriData, error);
+            }
+            
             // Create a media item from the URL
             const mediaItem = {
               id: `tenor_${Date.now()}`,
-              name: 'Tenor Sticker',
+              name: stickerName,
               type: 'image',
-              subtype: 'sticker',
+              subtype: uriData.includes('.gif') ? 'gif' : 'sticker', // Detect if it's a GIF URL
               url: uriData,
               width: 200,
               height: 200,
               duration: 3,
-              source: 'tenor'
+              source: 'tenor',
+              hasTransparency: true // Assume Tenor stickers have transparency
             };
             
             setSourceMedia(prev => [...prev, mediaItem]);
@@ -167,16 +206,18 @@ function App() {
           if (parsedData.url || parsedData.tenorUrl) {
             const mediaItem = {
               id: `tenor_${parsedData.id || Date.now()}`,
-              name: parsedData.description || 'Tenor Sticker',
+              name: parsedData.description || parsedData.name || `Tenor ${parsedData.id?.slice(-6) || 'Sticker'}`,
               type: 'image',
-              subtype: 'sticker',
+              subtype: parsedData.format && parsedData.format.includes('gif') ? 'gif' : 'sticker',
               url: parsedData.url,
               width: parsedData.width || 200,
               height: parsedData.height || 200,
               duration: 3,
               source: 'tenor',
               tenorUrl: parsedData.tenorUrl,
-              tags: parsedData.tags || []
+              tags: parsedData.tags || [],
+              hasTransparency: parsedData.hasTransparency,
+              format: parsedData.format
             };
             
             setSourceMedia(prev => [...prev, mediaItem]);
@@ -218,8 +259,11 @@ function App() {
   }, []);
 
   const handlePlayPause = useCallback(() => {
+    // Don't allow playback changes during export
+    if (exportProgress) return;
+    
     setIsPlaying(prev => !prev);
-  }, []);
+  }, [exportProgress]);
 
   const handleTimelineUpdate = useCallback((items) => {
     setMediaItems(items);
@@ -233,18 +277,39 @@ function App() {
 
   const handleExport = useCallback(async () => {
     try {
+      // Stop playback and enable export mode
+      setIsPlaying(false);
+      setIsExporting(true);
+      setSelectedItem(null); // Clear selection to remove any active handles
+      console.log('Export mode enabled, waiting for canvas update...');
       setExportProgress({ progress: 0, status: 'Initializing...' });
       
-      // Try the main export with frame-by-frame approach
+      // Create timeline seek callback for canvas capture
+      const onTimelineSeek = async (time) => {
+        setCurrentTime(time);
+        // Return a promise that resolves when the canvas has updated
+        return new Promise(resolve => {
+          // Single requestAnimationFrame should be sufficient
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      };
+      
+      // Give canvas time to update with export mode before starting capture
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Try the main export with canvas capture approach
       const result = await videoComposer.current.exportVideo({
         mediaItems,
         duration,
-        width: 1920, // Back to full resolution
-        height: 1080, // Back to full resolution
-        fps: 15, // Good balance of quality and performance
+        width: settings.canvasWidth, // Use settings canvas width
+        height: settings.canvasHeight, // Use settings canvas height
+        fps: settings.exportFrameRate, // Use custom frame rate
         onProgress: (progress, status) => {
           setExportProgress({ progress, status });
-        }
+        },
+        onTimelineSeek
       });
 
       // Create download link
@@ -254,6 +319,7 @@ function App() {
       link.click();
       
       setExportProgress(null);
+      setIsExporting(false); // Turn off export mode
     } catch (error) {
       console.error('Export failed:', error);
       
@@ -262,15 +328,29 @@ function App() {
         try {
           setExportProgress({ progress: 0, status: 'Trying MediaRecorder fallback...' });
           
+          // Create timeline seek callback for fallback too
+          const onTimelineSeek = async (time) => {
+            setCurrentTime(time);
+            return new Promise(resolve => {
+              requestAnimationFrame(() => {
+                resolve();
+              });
+            });
+          };
+          
+          // Give canvas time to update with export mode before starting fallback capture
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
           const result = await videoComposer.current.exportVideoFallback({
             mediaItems,
             duration,
-            width: 1920, // Keep full resolution for fallback too
-            height: 1080,
-            fps: 15, // Same frame rate
+            width: settings.canvasWidth, // Use settings canvas width
+            height: settings.canvasHeight, // Use settings canvas height
+            fps: settings.exportFrameRate, // Use custom frame rate
             onProgress: (progress, status) => {
               setExportProgress({ progress, status: `Fallback: ${status}` });
-            }
+            },
+            onTimelineSeek
           });
 
           // Create download link
@@ -280,18 +360,27 @@ function App() {
           link.click();
           
           setExportProgress({ progress: 100, status: 'Export completed using MediaRecorder (no alpha channel)' });
-          setTimeout(() => setExportProgress(null), 3000);
+          setTimeout(() => {
+            setExportProgress(null);
+            setIsExporting(false);
+          }, 3000);
         } catch (fallbackError) {
           console.error('Fallback export also failed:', fallbackError);
           setExportProgress({ progress: 0, status: 'Export failed: Video too complex for browser memory. Try shorter clips or fewer items.' });
-          setTimeout(() => setExportProgress(null), 5000);
+          setTimeout(() => {
+            setExportProgress(null);
+            setIsExporting(false);
+          }, 5000);
         }
       } else {
         setExportProgress({ progress: 0, status: 'Export failed: ' + error.message });
-        setTimeout(() => setExportProgress(null), 5000);
+        setTimeout(() => {
+          setExportProgress(null);
+          setIsExporting(false);
+        }, 5000);
       }
     }
-  }, [mediaItems, duration]);
+  }, [mediaItems, duration, settings]);
 
   const handleClear = useCallback(() => {
     setMediaItems([]);
@@ -318,10 +407,10 @@ function App() {
         document.activeElement.isContentEditable
       );
 
-      if (e.key === ' ' && !isTyping) {
+      if (e.key === ' ' && !isTyping && !exportProgress) {
         e.preventDefault();
         handlePlayPause();
-      } else if (e.key === 'Delete' && selectedItem && !isTyping) {
+      } else if (e.key === 'Delete' && selectedItem && !isTyping && !exportProgress) {
         setMediaItems(prev => prev.filter(item => item.id !== selectedItem.id));
         setSelectedItem(null);
       }
@@ -329,7 +418,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePlayPause, selectedItem]);
+  }, [handlePlayPause, selectedItem, exportProgress]);
 
   // Debug logging
   useEffect(() => {
@@ -343,7 +432,7 @@ function App() {
       case 'video':
         return '🎬';
       case 'image':
-        return item.subtype === 'gif' ? '🎭' : '🖼️';
+        return (item.subtype === 'gif' || item.subtype === 'sticker') ? '🎭' : '🖼️';
       case 'audio':
         return '🎵';
       default:
@@ -511,6 +600,8 @@ function App() {
         onExport={handleExport}
         onClear={handleClear}
         exportProgress={exportProgress}
+        settings={settings}
+        onSettingsChange={setSettings}
       />
       
       <div className="main-content" style={{ 
@@ -535,130 +626,130 @@ function App() {
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0
+        }}>
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid #444',
+            fontWeight: 'bold',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
           }}>
-            <div style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid #444',
-              fontWeight: 'bold',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
+            📁 Source Media
+            <span style={{ 
+              marginLeft: 'auto', 
+              fontSize: '12px', 
+              color: '#999',
+              fontWeight: 'normal'
             }}>
-              📁 Source Media
-              <span style={{ 
-                marginLeft: 'auto', 
-                fontSize: '12px', 
-                color: '#999',
-                fontWeight: 'normal'
-              }}>
-                {sourceMedia.length} items
-              </span>
-            </div>
-            
-            <div className="source-media-content" style={{
-              flex: 1,
-              overflow: 'auto',
-              padding: '8px'
-            }}>
-              {sourceMedia.length === 0 ? (
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+              {sourceMedia.length} items
+            </span>
+          </div>
+          
+          <div className="source-media-content" style={{
+            flex: 1,
+            overflow: 'auto',
+            padding: '8px'
+          }}>
+            {sourceMedia.length === 0 ? (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                   height: '120px',
-                  color: '#666',
-                  textAlign: 'center',
-                  border: '2px dashed #444',
-                  borderRadius: '8px',
-                  margin: '8px'
-                }}>
+                color: '#666',
+                textAlign: 'center',
+                border: '2px dashed #444',
+                borderRadius: '8px',
+                margin: '8px'
+              }}>
                   <div style={{ fontSize: '32px', marginBottom: '8px' }}>📁</div>
                   <div style={{ marginBottom: '4px', fontSize: '12px' }}>No media files</div>
                   <div style={{ fontSize: '10px' }}>Use "Add Media" to upload files</div>
-                </div>
-              ) : (
-                <div className="source-media-grid" style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                  gap: '8px',
-                  padding: '4px'
-                }}>
-                  {sourceMedia.map(item => (
-                    <div
-                      key={item.id}
-                      className="source-media-item"
-                      draggable
-                      onDragStart={(e) => handleSourceDragStart(e, item)}
-                      style={{
-                        background: '#333',
-                        border: '1px solid #555',
-                        borderRadius: '6px',
-                        padding: '8px',
-                        cursor: 'grab',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '6px',
-                        minHeight: '80px',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = '#404040';
-                        e.currentTarget.style.borderColor = '#666';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = '#333';
-                        e.currentTarget.style.borderColor = '#555';
-                      }}
-                    >
-                      {item.thumbnail ? (
-                        <img 
-                          src={item.thumbnail} 
-                          alt={item.name}
-                          style={{
-                            width: '100%',
-                            height: '60px',
-                            objectFit: 'cover',
-                            borderRadius: '4px',
-                            background: '#222'
-                          }}
-                        />
-                      ) : (
-                        <div style={{ 
-                          fontSize: '24px',
+              </div>
+            ) : (
+              <div className="source-media-grid" style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: '8px',
+                padding: '4px'
+              }}>
+                {sourceMedia.map(item => (
+                  <div
+                    key={item.id}
+                    className="source-media-item"
+                    draggable
+                    onDragStart={(e) => handleSourceDragStart(e, item)}
+                    style={{
+                      background: '#333',
+                      border: '1px solid #555',
+                      borderRadius: '6px',
+                      padding: '8px',
+                      cursor: 'grab',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '6px',
+                      minHeight: '80px',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#404040';
+                      e.currentTarget.style.borderColor = '#666';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#333';
+                      e.currentTarget.style.borderColor = '#555';
+                    }}
+                  >
+                    {item.thumbnail ? (
+                      <img 
+                        src={item.thumbnail} 
+                        alt={item.name}
+                        style={{
                           width: '100%',
                           height: '60px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: '#222',
-                          borderRadius: '4px'
-                        }}>
-                          {getMediaTypeIcon(item)}
-                        </div>
-                      )}
-                      <div style={{
-                        fontSize: '11px',
-                        color: '#ccc',
-                        textAlign: 'center',
-                        wordBreak: 'break-word',
-                        lineHeight: '1.2'
+                          objectFit: 'cover',
+                          borderRadius: '4px',
+                          background: '#222'
+                        }}
+                      />
+                    ) : (
+                      <div style={{ 
+                        fontSize: '24px',
+                        width: '100%',
+                        height: '60px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: '#222',
+                        borderRadius: '4px'
                       }}>
-                        {item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name}
+                        {getMediaTypeIcon(item)}
                       </div>
-                      <div style={{
-                        fontSize: '10px',
-                        color: '#999',
-                        textAlign: 'center'
-                      }}>
-                        {item.duration ? `${item.duration.toFixed(1)}s` : 'Static'}
-                      </div>
+                    )}
+                    <div style={{
+                      fontSize: '11px',
+                      color: '#ccc',
+                      textAlign: 'center',
+                      wordBreak: 'break-word',
+                      lineHeight: '1.2'
+                    }}>
+                      {item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name}
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div style={{
+                      fontSize: '10px',
+                      color: '#999',
+                      textAlign: 'center'
+                    }}>
+                      {item.duration ? `${item.duration.toFixed(1)}s` : 'Static'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             </div>
           </div>
 
@@ -695,6 +786,9 @@ function App() {
             selectedItem={selectedItem}
             onItemSelect={setSelectedItem}
             onItemUpdate={handleItemUpdate}
+            canvasWidth={settings.canvasWidth}
+            canvasHeight={settings.canvasHeight}
+            exportMode={isExporting}
           />
           
           <Timeline
@@ -703,8 +797,10 @@ function App() {
             duration={duration}
             isPlaying={isPlaying}
             onTimeUpdate={setCurrentTime}
+            onPlayPause={handlePlayPause}
             onItemsUpdate={handleTimelineUpdate}
             onDurationChange={setDuration}
+            playbackFrameRate={settings.exportFrameRate}
           />
         </div>
       </div>

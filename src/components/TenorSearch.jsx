@@ -68,6 +68,12 @@ const TenorSearch = ({ onStickerSelect }) => {
       const data = await response.json();
       console.log('Raw Tenor API response:', data);
       
+      // Log a sample result to see what fields are available
+      if (data.results && data.results.length > 0) {
+        console.log('Sample result fields:', Object.keys(data.results[0]));
+        console.log('Sample result:', data.results[0]);
+      }
+      
       // Filter results to only those that have at least one transparent format
       const filteredResults = data.results?.filter(result => {
         return TRANSPARENT_FORMATS.some(fmt => result.media_formats && result.media_formats[fmt]);
@@ -84,35 +90,47 @@ const TenorSearch = ({ onStickerSelect }) => {
         let height = 200;
         let selectedFormat = null;
         
-        // Try different transparent formats in order of preference (full size first)
+        // Debug: Log all available formats for this result
+        const availableFormats = Object.keys(result.media_formats || {});
+        console.log('Available formats for result', result.id, ':', availableFormats);
+        
+        // Try different transparent formats in order of preference (animated GIF first)
         const formatPriority = [
-          'gif_transparent',     // Full size animated GIF with transparency
-          'webp_transparent',    // Full size WebP with transparency  
-          'tinygif_transparent', // Small animated GIF with transparency
-          'tinywebp_transparent', // Small WebP with transparency
+          'gif_transparent',     // Full size animated GIF with transparency - PRIORITY
+          'tinygif_transparent', // Small animated GIF with transparency  
           'nanogif_transparent', // Tiny animated GIF with transparency
-          'nanowebp_transparent'  // Tiny WebP with transparency
+          'webp_transparent',    // Full size WebP with transparency (may be static)
+          'tinywebp_transparent', // Small WebP with transparency (may be static)
+          'nanowebp_transparent'  // Tiny WebP with transparency (may be static)
         ];
         
         for (const format of formatPriority) {
           if (result.media_formats?.[format]) {
-            stickerUrl = result.media_formats[format].url;
+            const formatData = result.media_formats[format];
+            stickerUrl = formatData.url;
             selectedFormat = format;
-            const dims = result.media_formats[format].dims;
+            const dims = formatData.dims;
             if (dims && dims.length >= 2) {
               width = dims[0];
               height = dims[1];
             }
-            console.log(`Using ${format} format:`, stickerUrl);
+            
+            console.log(`Selected ${format} format for result ${result.id}:`, {
+              url: stickerUrl,
+              dims: dims,
+              size: formatData.size || 'unknown',
+              duration: formatData.duration || 'unknown'
+            });
             break;
           }
         }
         
-        // Get preview URL (prefer smaller formats for preview)
-        const previewPriority = ['nanogif_transparent', 'nanowebp_transparent', 'tinygif_transparent', 'tinywebp_transparent'];
+        // Get preview URL (prefer smaller formats for preview, but still animated)
+        const previewPriority = ['nanogif_transparent', 'tinygif_transparent', 'gif_transparent'];
         for (const format of previewPriority) {
           if (result.media_formats?.[format]) {
             previewUrl = result.media_formats[format].url;
+            console.log(`Using ${format} for preview:`, previewUrl);
             break;
           }
         }
@@ -126,9 +144,40 @@ const TenorSearch = ({ onStickerSelect }) => {
           return null;
         }
 
+        console.log('Final selected URLs:', { main: stickerUrl, preview: previewUrl });
+
+        // Extract name from URL - much more reliable than API fields
+        let stickerName = 'Tenor Sticker'; // Default fallback
+        
+        try {
+          // Parse the URL to get the descriptive name
+          // URL format: https://media.tenor.com/{ID}/{descriptive-name}.gif
+          const url = new URL(stickerUrl);
+          const pathParts = url.pathname.split('/');
+          
+          if (pathParts.length >= 3) {
+            // Get the last part (filename) and remove extension
+            const filename = pathParts[pathParts.length - 1];
+            const nameWithoutExt = filename.split('.')[0];
+            
+            // Convert from kebab-case to readable name
+            if (nameWithoutExt && nameWithoutExt !== 'undefined' && nameWithoutExt.length > 1) {
+              stickerName = nameWithoutExt
+                .split('-')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to extract name from URL:', stickerUrl, error);
+          // Keep default fallback
+        }
+
+        console.log('Extracted sticker name:', stickerName, 'from URL:', stickerUrl);
+
         return {
           id: result.id,
-          description: result.content_description || 'Transparent Sticker',
+          description: stickerName,
           url: stickerUrl,
           preview: previewUrl,
           width: width,
@@ -180,7 +229,7 @@ const TenorSearch = ({ onStickerSelect }) => {
       id: `tenor_${sticker.id}`,
       name: sticker.description || 'Tenor Sticker',
       type: 'image',
-      subtype: 'sticker',
+      subtype: sticker.format && sticker.format.includes('gif') ? 'gif' : 'sticker', // More specific subtype
       url: sticker.url,
       width: sticker.width,
       height: sticker.height,
@@ -188,7 +237,8 @@ const TenorSearch = ({ onStickerSelect }) => {
       source: 'tenor',
       tenorUrl: sticker.tenorUrl,
       tags: sticker.tags,
-      hasTransparency: sticker.hasTransparency
+      hasTransparency: sticker.hasTransparency,
+      format: sticker.format // Keep original format info for debugging
     };
 
     // Add to source media (if callback provided)
@@ -240,7 +290,7 @@ const TenorSearch = ({ onStickerSelect }) => {
         alignItems: 'center',
         gap: '8px'
       }}>
-        🎭 Transparent Stickers Only
+        🎭 Stickers
       </div>
 
       {/* Search Input */}

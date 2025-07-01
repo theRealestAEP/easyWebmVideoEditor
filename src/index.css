@@ -4,8 +4,9 @@
   --bg-tertiary: #3d3d3d;
   --text-primary: #ffffff;
   --text-secondary: #cccccc;
-  --accent: #007acc;
-  --accent-hover: #005a9f;
+  --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
+  --accent-secondary: #6d28d9;
   --border: #555555;
   --timeline-bg: #2a2a2a;
   --timeline-track: #3a3a3a;
@@ -39,32 +40,180 @@ body {
 
 .toolbar {
   height: 60px;
-  background: var(--bg-secondary);
+  background: linear-gradient(to bottom, #333, #2a2a2a);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   padding: 0 20px;
-  gap: 15px;
+  justify-content: space-between;
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.toolbar-right {
+  justify-content: flex-end;
+}
+
+.toolbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 2;
+  gap: 16px;
+}
+
+.media-controls-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #444;
+}
+
+.control-btn {
+  background: transparent !important;
+  border: none !important;
+  color: #ccc !important;
+  font-size: 16px !important;
+  padding: 4px 8px !important;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.control-btn:hover {
+  color: #fff !important;
+  transform: none !important;
+}
+
+.play-button {
+  background: #555;
+  color: white;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.play-button:hover {
+  background: #666;
+}
+
+.play-button.playing {
+  background: #666;
+}
+
+.play-button.playing:hover {
+  background: #777;
+}
+
+.timeline-scrubber {
+  display: flex;
+  align-items: center;
+  width: 200px;
+  margin: 0 8px;
+}
+
+.scrubber-track {
+  flex: 1;
+  height: 4px;
+  background: #444;
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
+}
+
+.scrubber-handle {
+  position: absolute;
+  left: 25%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background: #8b5cf6;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.time-display {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+  min-width: 80px;
+  text-align: center;
 }
 
 .toolbar button {
-  background: var(--accent);
-  border: none;
-  color: white;
   padding: 8px 16px;
-  border-radius: 4px;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  transition: background-color 0.2s;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  color: white;
 }
 
-.toolbar button:hover {
-  background: var(--accent-hover);
+.add-media-button {
+  background: #555;
+  color: white;
+}
+
+.add-media-button:hover {
+  background: #666;
+  transform: none;
+}
+
+.settings-button {
+  background: #555;
+}
+
+.settings-button:hover {
+  background: #666;
+  transform: none;
+}
+
+.export-button {
+  background: #555;
+}
+
+.export-button:hover {
+  background: #666;
+  transform: none;
+}
+
+.clear-button {
+  background: #555;
+}
+
+.clear-button:hover {
+  background: #666;
+  transform: none;
 }
 
 .toolbar button:disabled {
   background: #666;
   cursor: not-allowed;
+  transform: none;
+}
+
+.toolbar-center h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .main-content {
@@ -125,7 +274,7 @@ body {
   top: 5px;
   bottom: 5px;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: move;
   display: flex;
   align-items: center;
@@ -133,6 +282,7 @@ body {
   font-size: 12px;
   color: white;
   user-select: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 .timeline-item:hover {
@@ -140,8 +290,8 @@ body {
 }
 
 .timeline-ruler {
-  height: 30px;
-  background: var(--bg-secondary);
+  height: 40px;
+  background: linear-gradient(to bottom, #2a2a2a, #252525);
   border-bottom: 1px solid var(--border);
   position: relative;
   overflow: hidden;
@@ -152,9 +302,10 @@ body {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #ff4444;
-  z-index: 10;
+  background: linear-gradient(to bottom, #ff4444, #cc3333);
+  z-index: 15;
   pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 68, 68, 0.5);
 }
 
 .file-input {
@@ -217,4 +368,111 @@ body {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
+}
+
+.settings-container {
+  position: relative;
+}
+
+.settings-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 280px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 1000;
+  margin-top: 5px;
+}
+
+.settings-section {
+  margin-bottom: 20px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.settings-row:last-child {
+  margin-bottom: 0;
+}
+
+.settings-row label {
+  color: #ccc;
+  font-size: 12px;
+  min-width: 80px;
+}
+
+.settings-row span {
+  color: #999;
+  font-size: 12px;
+}
+
+.preset-button {
+  padding: 6px 12px !important;
+  background: #444 !important;
+  color: #ccc !important;
+  border: 1px solid #666 !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.preset-button.small {
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+}
+
+.preset-button.active {
+  background: #8b5cf6 !important;
+  color: white !important;
+  border-color: #8b5cf6 !important;
+}
+
+.preset-button:hover {
+  background: #555 !important;
+  opacity: 1 !important;
+}
+
+.preset-button.active:hover {
+  background: #7c3aed !important;
+}
+
+.fps-input {
+  width: 60px;
+  padding: 4px 8px;
+  background: #444;
+  border: 1px solid #666;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.fps-input:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+.fps-presets {
+  display: flex;
+  gap: 4px;
 } 

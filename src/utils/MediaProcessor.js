@@ -109,7 +109,7 @@ export class MediaProcessor {
       
       // Extract frames based on media type
       let frameData;
-      if (mediaItem.type === 'video' || mediaItem.subtype === 'gif' || mediaItem.subtype === 'webp') {
+      if (mediaItem.type === 'video' || mediaItem.subtype === 'gif' || mediaItem.subtype === 'webp' || mediaItem.subtype === 'sticker') {
         frameData = await this.extractVideoFrames(inputFileName, outputPattern, mediaInfo, onProgress, mediaItem.name);
       } else {
         // Static image - create single frame
@@ -262,6 +262,7 @@ export class MediaProcessor {
     if (mediaItem.type === 'video') return 'mp4';
     if (mediaItem.subtype === 'gif') return 'gif';
     if (mediaItem.subtype === 'webp') return 'webp';
+    if (mediaItem.subtype === 'sticker') return 'gif'; // Tenor stickers are prioritized as GIFs
     return 'png';
   }
 
@@ -277,12 +278,25 @@ export class MediaProcessor {
       return null;
     }
     
-    // Find the appropriate frame without looping
-    const frameIndex = Math.floor(time * frameData.fps);
+    // Use more precise frame index calculation to prevent flickering
+    // Round to nearest frame instead of flooring for better precision
+    const frameIndex = Math.round(time * frameData.fps);
     const clampedIndex = Math.max(0, Math.min(frameIndex, frameData.frames.length - 1));
     
+    // Add additional bounds checking
+    if (clampedIndex >= frameData.frames.length) {
+      return frameData.frames[frameData.frames.length - 1];
+    }
+    
     // Return the frame if it exists, otherwise null
-    return frameData.frames[clampedIndex] || null;
+    const selectedFrame = frameData.frames[clampedIndex];
+    
+    // Debug logging to track frame selection
+    if (!selectedFrame) {
+      console.warn(`No frame found at index ${clampedIndex} for time ${time}, total frames: ${frameData.frames.length}`);
+    }
+    
+    return selectedFrame || null;
   }
 
   // Create standardized media processor

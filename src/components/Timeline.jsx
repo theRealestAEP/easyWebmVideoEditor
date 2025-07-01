@@ -6,8 +6,10 @@ const Timeline = ({
   duration, 
   isPlaying,
   onTimeUpdate, 
+  onPlayPause,
   onItemsUpdate,
-  onDurationChange 
+  onDurationChange,
+  playbackFrameRate = 15 // Default to 15fps if not provided
 }) => {
   const timelineRef = useRef();
   const [isDragging, setIsDragging] = useState(false);
@@ -27,18 +29,21 @@ const Timeline = ({
   // Playback timer
   useEffect(() => {
     if (isPlaying) {
+      const frameInterval = 1000 / playbackFrameRate; // Convert FPS to milliseconds
+      const timeStep = 1 / playbackFrameRate; // Time step per frame
+      
       playbackInterval.current = setInterval(() => {
         onTimeUpdate(prev => {
-          const next = prev + 0.1;
+          const next = prev + timeStep;
           return next >= duration ? 0 : next;
         });
-      }, 100);
+      }, frameInterval);
     } else {
       clearInterval(playbackInterval.current);
     }
 
     return () => clearInterval(playbackInterval.current);
-  }, [isPlaying, duration, onTimeUpdate]);
+  }, [isPlaying, duration, onTimeUpdate, playbackFrameRate]);
 
   // Audio playback management
   useEffect(() => {
@@ -106,6 +111,7 @@ const Timeline = ({
     for (let time = 0; time <= duration; time += interval) {
       const left = time * scale;
       const isMainMarker = time % (interval * 5) === 0;
+      const isMajorMarker = time % (interval * 10) === 0;
       
       markers.push(
         <div
@@ -113,26 +119,27 @@ const Timeline = ({
           style={{
             position: 'absolute',
             left: `${left}px`,
-            top: '0',
+            top: isMajorMarker ? '0' : isMainMarker ? '8px' : '12px',
             width: '1px',
-            height: isMainMarker ? '20px' : '10px',
-            backgroundColor: '#666',
+            height: isMajorMarker ? '32px' : isMainMarker ? '24px' : '20px',
+            backgroundColor: isMajorMarker ? '#555' : isMainMarker ? '#444' : '#333',
             pointerEvents: 'none'
           }}
         />
       );
       
-      if (isMainMarker) {
+      if (isMajorMarker) {
         markers.push(
           <div
             key={`label-${time}`}
             style={{
               position: 'absolute',
-              left: `${left + 2}px`,
+              left: `${left + 3}px`,
               top: '2px',
               fontSize: '10px',
-              color: '#ccc',
-              pointerEvents: 'none'
+              color: '#888',
+              pointerEvents: 'none',
+              fontFamily: 'monospace'
             }}
           >
             {Math.floor(time / 60)}:{(time % 60).toString().padStart(2, '0')}
@@ -190,8 +197,8 @@ const Timeline = ({
         startTime: Math.round(dropTime * 10) / 10, // Snap to 0.1s grid
         x: 100, // Default canvas position
         y: 100,
-        width: sourceItem.type === 'video' || sourceItem.subtype === 'gif' ? 320 : 200,
-        height: sourceItem.type === 'video' || sourceItem.subtype === 'gif' ? 180 : 150,
+        width: sourceItem.type === 'video' || sourceItem.subtype === 'gif' || sourceItem.subtype === 'sticker' ? 320 : 200,
+        height: sourceItem.type === 'video' || sourceItem.subtype === 'gif' || sourceItem.subtype === 'sticker' ? 180 : 150,
         rotation: 0,
         opacity: 1,
         // Force track if dropped in specific area
@@ -284,13 +291,13 @@ const Timeline = ({
         
         // Only assign if targeting video track area (after audio tracks)
         if (videoTrackIndex >= 0) {
-          // Ensure we have enough video tracks
+        // Ensure we have enough video tracks
           while (videoTracks.length <= videoTrackIndex) {
-            videoTracks.push([]);
-          }
-          
+          videoTracks.push([]);
+        }
+        
           videoTracks[videoTrackIndex].push({ ...item, trackIndex: videoTrackIndex, trackType: 'video', forceTrackIndex: undefined });
-          return;
+        return;
         }
       }
       
@@ -680,14 +687,34 @@ const Timeline = ({
     }
   }, [isDragging]);
 
-  // Handle mouse wheel for zooming
+  // Handle mouse wheel for smooth timeline zooming
   const handleWheel = useCallback((e) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setScale(prev => Math.max(5, Math.min(100, prev * delta)));
+    e.preventDefault();
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    
+    // Calculate the time position under the mouse before zoom
+    const timeUnderMouse = mouseX / scale;
+    
+    // Calculate new scale with smooth increments
+    const zoomFactor = e.deltaY > 0 ? 0.85 : 1.18; // More granular zoom steps
+    const newScale = Math.max(2, Math.min(200, scale * zoomFactor)); // Wider zoom range
+    
+    // Calculate how much to adjust the scroll position to keep the mouse position stable
+    const newMouseX = timeUnderMouse * newScale;
+    const scrollDelta = newMouseX - mouseX;
+    
+    setScale(newScale);
+    
+    // Adjust scroll position to keep zoom centered on mouse (if timeline is scrollable)
+    if (timelineRef.current.parentElement) {
+      const container = timelineRef.current.parentElement;
+      if (container.scrollLeft !== undefined) {
+        container.scrollLeft += scrollDelta;
+      }
     }
-  }, []);
+  }, [scale]);
 
   // Handle right-click context menu
   const handleContextMenu = useCallback((e, item) => {
@@ -880,7 +907,7 @@ const Timeline = ({
     if (item.type === 'video') {
       return '🎬'; // Video camera for regular videos
     } else if (item.type === 'image') {
-      return item.subtype === 'gif' ? '🎭' : '🖼️'; // Animated mask for GIFs, frame for static images
+      return (item.subtype === 'gif' || item.subtype === 'sticker') ? '🎭' : '🖼️'; // Animated mask for GIFs and stickers, frame for static images
     }
     return '📄'; // Default fallback
   }, []);
@@ -888,38 +915,63 @@ const Timeline = ({
   // Get item color based on type
   const getItemColor = useCallback((item) => {
     if (item.type === 'video') {
-      return 'linear-gradient(45deg, #4a9eff, #2d5aa0)';
+      return '#8b5cf6'; // Purple for videos
     } else if (item.type === 'image') {
-      return item.subtype === 'gif' ? 'linear-gradient(45deg, #4a9eff, #2d5aa0)' : 'linear-gradient(45deg, #50c878, #2d5016)';
+      return (item.subtype === 'gif' || item.subtype === 'sticker') ? 
+             '#8b5cf6' : // Purple for animated images
+             '#10b981'; // Green for static images
     } else if (item.type === 'audio') {
-      return 'linear-gradient(45deg, #ff6b6b, #c92a2a)';
+      return '#06b6d4'; // Cyan for audio to distinguish from video
     }
-    return 'linear-gradient(45deg, #50c878, #2d5016)';
+    return '#8b5cf6'; // Default purple
   }, []);
 
   return (
-    <div className="timeline-container">
-      <div className="timeline-header">
-        <span>Timeline</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <span style={{ fontSize: '12px', color: '#ccc' }}>
+    <div className="timeline-container" style={{
+      border: '1px solid #333',
+      borderTop: 'none'
+    }}>
+      <div className="timeline-header" style={{
+        background: '#2a2a2a',
+        padding: '8px 16px',
+        borderBottom: '1px solid #333',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        height: '40px'
+      }}>
+        <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
+        
+        <button 
+          onClick={onPlayPause}
+          className={`timeline-play-button ${isPlaying ? 'playing' : ''}`}
+          style={{
+            background: '#444',
+            color: 'white',
+            border: 'none',
+            width: '28px',
+            height: '28px',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '11px',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease'
+          }}
+          onMouseEnter={(e) => e.target.style.background = '#555'}
+          onMouseLeave={(e) => e.target.style.background = '#444'}
+        >
+          {isPlaying ? '❚❚' : '▶'}
+        </button>
+        
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', color: '#999' }}>
             Selected: {selectedItems.size} | Copied: {copiedItems.length}
           </span>
-          <span style={{ fontSize: '12px' }}>
+          <span style={{ fontSize: '11px', color: '#ccc', fontFamily: 'monospace' }}>
             {Math.floor(currentTime / 60)}:{(currentTime % 60).toFixed(1).padStart(4, '0')} / {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, '0')}
           </span>
-          <button 
-            onClick={() => onDurationChange(duration + 10)}
-            style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', color: '#fff', cursor: 'pointer' }}
-          >
-            +10s
-          </button>
-          <button 
-            onClick={() => onDurationChange(Math.max(10, duration - 10))}
-            style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', color: '#fff', cursor: 'pointer' }}
-          >
-            -10s
-          </button>
         </div>
       </div>
       
@@ -930,7 +982,13 @@ const Timeline = ({
         onWheel={handleWheel}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
-        style={{ position: 'relative', height: '25px', background: '#2a2a2a', cursor: 'pointer' }}
+        style={{ 
+          position: 'relative', 
+          height: '32px', 
+          background: '#252525', 
+          cursor: 'pointer',
+          borderBottom: '1px solid #333'
+        }}
       >
         {generateTimeMarkers()}
         <div 
@@ -941,54 +999,59 @@ const Timeline = ({
             top: '0',
             width: '2px',
             height: '100%',
-            backgroundColor: '#ff4444',
+            background: '#ff4444',
             pointerEvents: 'none',
-            zIndex: 10
+            zIndex: 15
           }}
-        />
+        >
+          {/* Playhead handle */}
+          <div style={{
+            position: 'absolute',
+            top: '-1px',
+            left: '-3px',
+            width: '8px',
+            height: '6px',
+            background: '#ff4444',
+            borderRadius: '1px'
+          }} />
+        </div>
       </div>
       
-      <div className="timeline-tracks" style={{ minHeight: '200px', background: '#1a1a1a', position: 'relative' }}
+      <div className="timeline-tracks" style={{ 
+        minHeight: '200px', 
+        background: '#1e1e1e', 
+        position: 'relative'
+      }}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
         onClick={handleTracksClick}
       >
-        {/* Left edge gradient overlay */}
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: '20px',
-          background: 'linear-gradient(to right, rgba(26, 26, 26, 0.8), transparent)',
-          pointerEvents: 'none',
-          zIndex: 10
-        }} />
-        
         {/* Audio Tracks */}
         {trackAssignments.audioTracks.map((track, trackIndex) => (
           <div
             key={`audio-${trackIndex}`}
             className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
             style={{
-              height: '60px',
-              borderBottom: '1px solid #444',
+              height: '50px',
+              borderBottom: '1px solid #2a2a2a',
               position: 'relative',
-              backgroundColor: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
-                              'rgba(74, 144, 226, 0.1)' : 'rgba(255, 107, 107, 0.05)' // Slight red tint for audio tracks
+              background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                         'rgba(139, 92, 246, 0.1)' : 
+                         '#1e1e1e'
             }}
           >
             {/* Track label */}
             <div style={{
               position: 'absolute',
-              left: '5px',
-              top: '5px',
-              fontSize: '12px',
-              color: '#ff6b6b',
+              left: '8px',
+              top: '6px',
+              fontSize: '10px',
+              color: '#888',
               pointerEvents: 'none',
-              zIndex: 1
+              zIndex: 1,
+              fontWeight: '500'
             }}>
-              Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
+              🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
             </div>
 
             {/* Track items */}
@@ -1003,20 +1066,27 @@ const Timeline = ({
                   style={{
                     position: 'absolute',
                     left: `${left}px`,
-                    top: '20px',
+                    top: '18px',
                     width: `${width}px`,
-                    height: '35px',
-                    background: getItemColor(item),
-                    border: selectedItems.has(item.id) ? '2px solid #4a90e2' : '1px solid #555',
+                    height: '28px',
+                    background: selectedItems.has(item.id) ? 
+                               '#8b5cf6' : 
+                               '#06b6d4',
+                    border: selectedItems.has(item.id) ? 
+                           '2px solid #a855f7' : 
+                           '1px solid rgba(255,255,255,0.1)',
                     borderRadius: '4px',
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '0 8px',
+                    padding: '0 6px',
                     cursor: 'pointer',
                     overflow: 'hidden',
-                    fontSize: '12px',
+                    fontSize: '10px',
                     color: '#fff',
-                    userSelect: 'none'
+                    userSelect: 'none',
+                    boxShadow: selectedItems.has(item.id) ? 
+                              '0 2px 4px rgba(139, 92, 246, 0.3)' : 
+                              '0 1px 2px rgba(0,0,0,0.2)'
                   }}
                   onMouseDown={(e) => handleItemMouseDown(e, item)}
                   onContextMenu={(e) => handleContextMenu(e, item)}
@@ -1026,7 +1096,7 @@ const Timeline = ({
                     whiteSpace: 'nowrap', 
                     overflow: 'hidden', 
                     textOverflow: 'ellipsis',
-                    fontWeight: selectedItems.has(item.id) ? 'bold' : 'normal'
+                    fontWeight: '500'
                   }}>
                     🎵 {item.name}
                   </span>
@@ -1036,104 +1106,124 @@ const Timeline = ({
           </div>
         ))}
         
-        {/* Video Tracks */}
-        {trackAssignments.videoTracks.map((track, trackIndex) => (
-          <div
-            key={`video-${trackIndex}`}
-            className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
-            style={{
-              height: '60px',
-              borderBottom: '1px solid #444',
-              position: 'relative',
-              backgroundColor: dragTargetTrack?.index === (trackAssignments.audioTracks.length + trackIndex) && 
-                             dragTargetTrack?.canPlaceHere ? 'rgba(74, 144, 226, 0.1)' : 'transparent'
-            }}
-          >
-            {/* Track label */}
-            <div style={{
-              position: 'absolute',
-              left: '5px',
-              top: '5px',
-              fontSize: '12px',
-              color: '#999',
-              pointerEvents: 'none',
-              zIndex: 1
-            }}>
-              Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
-            </div>
+        {/* Video Tracks - Always show at least one */}
+        {Math.max(1, trackAssignments.videoTracks.length) && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
+          const track = trackAssignments.videoTracks[trackIndex] || [];
+          return (
+            <div
+              key={`video-${trackIndex}`}
+              className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
+              style={{
+                height: '50px',
+                borderBottom: '1px solid #2a2a2a',
+                position: 'relative',
+                background: dragTargetTrack?.index === (trackAssignments.audioTracks.length + trackIndex) && 
+                           dragTargetTrack?.canPlaceHere ? 
+                           'rgba(139, 92, 246, 0.1)' : 
+                           '#1e1e1e'
+              }}
+            >
+              {/* Track label */}
+              <div style={{
+                position: 'absolute',
+                left: '8px',
+                top: '6px',
+                fontSize: '10px',
+                color: '#888',
+                pointerEvents: 'none',
+                zIndex: 1,
+                fontWeight: '500'
+              }}>
+                🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
+              </div>
 
-            {/* Track items */}
-            {track.map(item => {
-              const left = item.startTime * scale;
-              const width = item.duration * scale;
-              
-              return (
-                <div
-                  key={item.id}
-                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                  style={{
-                    position: 'absolute',
-                    left: `${left}px`,
-                    top: '20px',
-                    width: `${width}px`,
-                    height: '35px',
-                    background: getItemColor(item),
-                    border: selectedItems.has(item.id) ? '2px solid #4a90e2' : '1px solid #555',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 8px',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    fontSize: '12px',
-                    color: '#fff',
-                    userSelect: 'none'
-                  }}
-                  onMouseDown={(e) => handleItemMouseDown(e, item)}
-                  onContextMenu={(e) => handleContextMenu(e, item)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <span style={{ 
-                    whiteSpace: 'nowrap', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis',
-                    fontWeight: selectedItems.has(item.id) ? 'bold' : 'normal'
-                  }}>
-                    {item.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+              {/* Track items */}
+              {track.map(item => {
+                const left = item.startTime * scale;
+                const width = item.duration * scale;
+                
+                return (
+                  <div
+                    key={item.id}
+                    className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                    style={{
+                      position: 'absolute',
+                      left: `${left}px`,
+                      top: '18px',
+                      width: `${width}px`,
+                      height: '28px',
+                      background: selectedItems.has(item.id) ? 
+                                 '#8b5cf6' : 
+                                 getItemColor(item),
+                      border: selectedItems.has(item.id) ? 
+                             '2px solid #a855f7' : 
+                             '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '0 6px',
+                      cursor: 'pointer',
+                      overflow: 'hidden',
+                      fontSize: '10px',
+                      color: '#fff',
+                      userSelect: 'none',
+                      boxShadow: selectedItems.has(item.id) ? 
+                                '0 2px 4px rgba(139, 92, 246, 0.3)' : 
+                                '0 1px 2px rgba(0,0,0,0.2)'
+                    }}
+                    onMouseDown={(e) => handleItemMouseDown(e, item)}
+                    onContextMenu={(e) => handleContextMenu(e, item)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span style={{ 
+                      whiteSpace: 'nowrap', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis',
+                      fontWeight: '500'
+                    }}>
+                      {item.name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
 
         {/* New Track Drop Zone - only show when dragging */}
         {isDragging && (
           <div
             style={{
-              height: '60px',
-              borderBottom: '2px dashed #666',
+              height: '50px',
+              borderBottom: '2px dashed #444',
               position: 'relative',
-              backgroundColor: dragTargetTrack?.isNewTrack ? 'rgba(74, 144, 226, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+              background: dragTargetTrack?.isNewTrack ? 
+                         'rgba(139, 92, 246, 0.1)' : 
+                         '#1e1e1e',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#999',
-              fontSize: '14px',
-              fontStyle: 'italic'
+              color: '#666',
+              fontSize: '11px',
+              fontStyle: 'italic',
+              fontWeight: '500'
             }}
           >
             {dragTargetTrack?.isNewTrack ? (
-              <span style={{ color: '#4a90e2' }}>Drop here to create new track</span>
+              <span style={{ color: '#8b5cf6' }}>
+                ✨ Drop here to create new track
+              </span>
             ) : (
-              <span>Drop here to create new track</span>
+              <span>
+                Drop here to create new track
+              </span>
             )}
           </div>
         )}
         
         {/* Calculate total height needed */}
         <div style={{ 
-          height: `${(trackAssignments.audioTracks.length + trackAssignments.videoTracks.length) * 60 + 20}px` 
+          height: `${Math.max(1, (trackAssignments.audioTracks.length + Math.max(1, trackAssignments.videoTracks.length))) * 50 + 20}px` 
         }} />
       </div>
 
@@ -1145,53 +1235,53 @@ const Timeline = ({
             position: 'fixed',
             left: `${contextMenu.x}px`,
             top: `${contextMenu.y}px`,
-            background: '#333',
-            border: '1px solid #555',
-            borderRadius: '4px',
-            padding: '8px 0',
-            minWidth: '150px',
+            background: '#2a2a2a',
+            border: '1px solid #444',
+            borderRadius: '6px',
+            padding: '6px 0',
+            minWidth: '160px',
             zIndex: 1000,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <div 
-            style={{ padding: '8px 16px', cursor: 'pointer', color: '#fff' }}
-            onMouseEnter={(e) => e.target.style.background = '#444'}
+            style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
+            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={() => toggleTrackLock(contextMenu.item.id)}
           >
             {lockedTracks.has(contextMenu.item.id) ? '🔓 Unlock Track' : '🔒 Lock Track'}
           </div>
           <div 
-            style={{ padding: '8px 16px', cursor: 'pointer', color: '#fff' }}
-            onMouseEnter={(e) => e.target.style.background = '#444'}
+            style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
+            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={copySelectedItems}
           >
             📋 Copy (Ctrl+C)
           </div>
           <div 
-            style={{ padding: '8px 16px', cursor: 'pointer', color: '#fff' }}
-            onMouseEnter={(e) => e.target.style.background = '#444'}
+            style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
+            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={duplicateSelectedItems}
           >
             📋 Duplicate (Ctrl+D)
           </div>
           <div 
-            style={{ padding: '8px 16px', cursor: 'pointer', color: '#fff' }}
-            onMouseEnter={(e) => e.target.style.background = '#444'}
+            style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
+            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={pasteItems}
             disabled={copiedItems.length === 0}
           >
             📋 Paste (Ctrl+V) {copiedItems.length > 0 ? `(${copiedItems.length})` : ''}
           </div>
-          <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #555' }} />
+          <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #444' }} />
           <div 
-            style={{ padding: '8px 16px', cursor: 'pointer', color: '#ff6b6b' }}
-            onMouseEnter={(e) => e.target.style.background = '#444'}
+            style={{ padding: '6px 12px', cursor: 'pointer', color: '#ff6b6b', fontSize: '12px' }}
+            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={deleteSelectedItems}
           >
@@ -1202,12 +1292,14 @@ const Timeline = ({
 
       {/* Help text */}
       <div style={{ 
-        padding: '8px', 
-        fontSize: '11px', 
+        padding: '8px 16px', 
+        fontSize: '10px', 
         color: '#666',
-        borderTop: '1px solid #333'
+        borderTop: '1px solid #2a2a2a',
+        background: '#1a1a1a',
+        fontWeight: '400'
       }}>
-        💡 Ctrl+Click: Multi-select | Ctrl+Scroll: Zoom | Right-click: Context menu | Drag: Move items
+        💡 Shift+Click: Multi-select | Scroll: Zoom timeline | Right-click: Context menu | Drag: Move items
       </div>
     </div>
   );
