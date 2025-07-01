@@ -475,4 +475,93 @@ body {
 .fps-presets {
   display: flex;
   gap: 4px;
+}
+
+/* Project Management and Undo/Redo Toolbar Styles */
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #555;
+  margin: 0 8px;
+}
+
+.project-button {
+  background: #444 !important;
+  color: #ccc !important;
+  font-size: 12px !important;
+  padding: 6px 10px !important;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-button:hover {
+  background: #555 !important;
+  color: #fff !important;
+}
+
+.project-button.save {
+  background: #10b981 !important;
+  color: #fff !important;
+}
+
+.project-button.save:hover {
+  background: #059669 !important;
+}
+
+.project-button.load {
+  background: #3b82f6 !important;
+  color: #fff !important;
+}
+
+.project-button.load:hover {
+  background: #2563eb !important;
+}
+
+.action-button {
+  background: #444 !important;
+  color: #ccc !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  padding: 6px 8px !important;
+  min-width: 32px !important;
+  border-radius: 4px !important;
+}
+
+.action-button:hover:not(:disabled) {
+  background: #555 !important;
+  color: #fff !important;
+}
+
+.action-button:disabled {
+  background: #333 !important;
+  color: #666 !important;
+  cursor: not-allowed !important;
+  opacity: 0.5 !important;
+}
+
+.project-name {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #8b5cf6;
+  margin-left: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+/* Notification Animation */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 } 

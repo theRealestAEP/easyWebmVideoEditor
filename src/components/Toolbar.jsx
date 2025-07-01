@@ -8,7 +8,15 @@ const Toolbar = ({
   onClear,
   exportProgress,
   settings,
-  onSettingsChange
+  onSettingsChange,
+  // New props for project management and undo/redo
+  onSaveProject,
+  onLoadProject,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  currentProjectName
 }) => {
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef();
@@ -46,6 +54,42 @@ const Toolbar = ({
         <button onClick={onAddMedia} className="add-media-button">
           Add Media
         </button>
+        
+        <div className="toolbar-divider"></div>
+        
+        {/* Project Management */}
+        <button onClick={onSaveProject} className="project-button save">
+          💾 Save
+        </button>
+        <button onClick={onLoadProject} className="project-button load">
+          📁 Load
+        </button>
+        
+        <div className="toolbar-divider"></div>
+        
+        {/* Undo/Redo */}
+        <button 
+          onClick={onUndo} 
+          className="action-button undo"
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+        >
+          ↶
+        </button>
+        <button 
+          onClick={onRedo} 
+          className="action-button redo"
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+        >
+          ↷
+        </button>
+        
+        {currentProjectName && (
+          <div className="project-name">
+            📄 {currentProjectName}
+          </div>
+        )}
       </div>
       
       <div className="toolbar-center">

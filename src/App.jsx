@@ -5,6 +5,7 @@ import Toolbar from './components/Toolbar';
 import ExportProgress from './components/ExportProgress';
 import { VideoComposer } from './utils/VideoComposer';
 import TenorSearch from './components/TenorSearch';
+import ProjectManager from './utils/ProjectManager';
 
 function App() {
   const [mediaItems, setMediaItems] = useState([]);
@@ -24,8 +25,16 @@ function App() {
     exportFrameRate: 15
   });
   
+  // Project management state
+  const [currentProjectName, setCurrentProjectName] = useState(null);
+  const [showProjectDialog, setShowProjectDialog] = useState(false);
+  const [projectAction, setProjectAction] = useState(null); // 'save' or 'load'
+  const [notification, setNotification] = useState(null);
+  
   const fileInputRef = useRef();
   const videoComposer = useRef(new VideoComposer());
+  const projectManager = useRef(new ProjectManager());
+  const lastStateRef = useRef(null);
 
   // Calculate total duration based on media items
   const calculateDuration = useCallback(() => {
@@ -41,6 +50,50 @@ function App() {
       setDuration(newDuration);
     }
   }, [mediaItems, calculateDuration, duration]);
+
+  // Get current app state for project management
+  const getCurrentState = useCallback(() => ({
+    mediaItems,
+    sourceMedia,
+    currentTime,
+    duration,
+    settings,
+    selectedItem
+  }), [mediaItems, sourceMedia, currentTime, duration, settings, selectedItem]);
+
+  // Push state to undo stack when significant changes occur
+  const pushUndoState = useCallback(() => {
+    const currentState = getCurrentState();
+    
+    // Only push if state has actually changed
+    const stateString = JSON.stringify({
+      mediaItems: currentState.mediaItems.map(item => ({ ...item, file: null })),
+      sourceMedia: currentState.sourceMedia.map(item => ({ ...item, file: null, thumbnail: null }))
+    });
+    
+    if (lastStateRef.current !== stateString) {
+      projectManager.current.pushState(currentState);
+      lastStateRef.current = stateString;
+    }
+  }, [getCurrentState]);
+
+  // Show notification
+  const showNotification = useCallback((message, type = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 3000);
+  }, []);
+
+  // Initialize project manager and push initial state
+  useEffect(() => {
+    projectManager.current.init().then(() => {
+      pushUndoState(); // Push initial state
+    });
+  }, [pushUndoState]);
+
+  // Push state when significant changes occur
+  useEffect(() => {
+    pushUndoState();
+  }, [mediaItems, sourceMedia, pushUndoState]);
 
   // Handle adding media files
   const handleAddMedia = useCallback(() => {
@@ -387,7 +440,11 @@ function App() {
     setSourceMedia([]);
     setCurrentTime(0);
     setSelectedItem(null);
-  }, []);
+    setCurrentProjectName(null);
+    
+    // Push state for undo
+    setTimeout(pushUndoState, 100);
+  }, [pushUndoState]);
 
   // Handle Tenor GIF selection
   const handleTenorGifSelect = useCallback((gifMediaItem) => {
@@ -396,6 +453,119 @@ function App() {
     // Only add the selected GIF to source media - let user drag to timeline
     setSourceMedia(prev => [...prev, gifMediaItem]);
   }, []);
+
+  // Undo functionality
+  const handleUndo = useCallback(async () => {
+    if (!projectManager.current.canUndo()) return;
+    
+    const previousState = projectManager.current.undo(getCurrentState());
+    if (previousState) {
+      // We need to restore files for source media items that have them
+      const restoredSourceMedia = await Promise.all(
+        previousState.sourceMedia.map(async (item) => {
+          if (item.file && item.file.name) {
+            // Find the file in current source media
+            const currentItem = sourceMedia.find(current => 
+              current.id === item.id && current.file && current.file.name === item.file.name
+            );
+            if (currentItem && currentItem.file) {
+              return { ...item, file: currentItem.file };
+            }
+          }
+          return item;
+        })
+      );
+      
+      setMediaItems(previousState.mediaItems);
+      setSourceMedia(restoredSourceMedia);
+      setCurrentTime(previousState.currentTime);
+      setDuration(previousState.duration);
+      setSettings(previousState.settings);
+      setSelectedItem(previousState.selectedItem);
+      
+      showNotification('Undo successful');
+    }
+  }, [getCurrentState, sourceMedia, showNotification]);
+
+  // Redo functionality  
+  const handleRedo = useCallback(async () => {
+    if (!projectManager.current.canRedo()) return;
+    
+    const nextState = projectManager.current.redo();
+    if (nextState) {
+      // Restore files similar to undo
+      const restoredSourceMedia = await Promise.all(
+        nextState.sourceMedia.map(async (item) => {
+          if (item.file && item.file.name) {
+            const currentItem = sourceMedia.find(current => 
+              current.id === item.id && current.file && current.file.name === item.file.name
+            );
+            if (currentItem && currentItem.file) {
+              return { ...item, file: currentItem.file };
+            }
+          }
+          return item;
+        })
+      );
+      
+      setMediaItems(nextState.mediaItems);
+      setSourceMedia(restoredSourceMedia);
+      setCurrentTime(nextState.currentTime);
+      setDuration(nextState.duration);
+      setSettings(nextState.settings);
+      setSelectedItem(nextState.selectedItem);
+      
+      showNotification('Redo successful');
+    }
+  }, [sourceMedia, showNotification]);
+
+  // Save project
+  const handleSaveProject = useCallback(async (projectName) => {
+    const currentState = getCurrentState();
+    const result = await projectManager.current.saveProject(currentState, projectName);
+    
+    if (result.success) {
+      setCurrentProjectName(result.projectName);
+      showNotification(`Project "${result.projectName}" saved successfully!`, 'success');
+    } else {
+      showNotification(`Failed to save project: ${result.error}`, 'error');
+    }
+    
+    setShowProjectDialog(false);
+  }, [getCurrentState, showNotification]);
+
+  // Load project
+  const handleLoadProject = useCallback(async (projectId) => {
+    const result = await projectManager.current.loadProject(projectId);
+    
+    if (result.success) {
+      const project = result.project;
+      
+      setMediaItems(project.mediaItems || []);
+      setSourceMedia(project.sourceMedia || []);
+      setCurrentTime(project.currentTime || 0);
+      setDuration(project.duration || 30);
+      setSettings(project.settings || settings);
+      setSelectedItem(project.selectedItem || null);
+      setCurrentProjectName(project.name);
+      
+      // Clear undo history when loading a project
+      projectManager.current.clearHistory();
+      pushUndoState();
+      
+      showNotification(`Project "${project.name}" loaded successfully!`, 'success');
+      
+      // Check for files that need to be re-imported
+      const missingFiles = project.sourceMedia.filter(item => item.needsReimport || item.isMissingFile);
+      if (missingFiles.length > 0) {
+        showNotification(`${missingFiles.length} large files need to be re-imported`, 'warning');
+      }
+    } else {
+      showNotification(`Failed to load project: ${result.error}`, 'error');
+    }
+    
+    setShowProjectDialog(false);
+  }, [settings, pushUndoState, showNotification]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -413,12 +583,29 @@ function App() {
       } else if (e.key === 'Delete' && selectedItem && !isTyping && !exportProgress) {
         setMediaItems(prev => prev.filter(item => item.id !== selectedItem.id));
         setSelectedItem(null);
+      } else if ((e.ctrlKey || e.metaKey) && !isTyping && !exportProgress) {
+        // Undo/Redo shortcuts
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          handleUndo();
+        } else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          handleRedo();
+        } else if (e.key === 's') {
+          e.preventDefault();
+          setProjectAction('save');
+          setShowProjectDialog(true);
+        } else if (e.key === 'o') {
+          e.preventDefault();
+          setProjectAction('load');
+          setShowProjectDialog(true);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePlayPause, selectedItem, exportProgress]);
+  }, [handlePlayPause, selectedItem, exportProgress, handleUndo, handleRedo]);
 
   // Debug logging
   useEffect(() => {
@@ -602,6 +789,21 @@ function App() {
         exportProgress={exportProgress}
         settings={settings}
         onSettingsChange={setSettings}
+        // Project management props
+        onSaveProject={() => {
+          setProjectAction('save');
+          setShowProjectDialog(true);
+        }}
+        onLoadProject={() => {
+          setProjectAction('load');
+          setShowProjectDialog(true);
+        }}
+        // Undo/redo props
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={projectManager.current?.canUndo()}
+        canRedo={projectManager.current?.canRedo()}
+        currentProjectName={currentProjectName}
       />
       
       <div className="main-content" style={{ 
@@ -851,8 +1053,255 @@ function App() {
       {exportProgress && (
         <ExportProgress progress={exportProgress} />
       )}
+
+      {/* Project Save/Load Dialog */}
+      {showProjectDialog && (
+        <ProjectDialog
+          action={projectAction}
+          currentProjectName={currentProjectName}
+          onSave={handleSaveProject}
+          onLoad={handleLoadProject}
+          onCancel={() => setShowProjectDialog(false)}
+          projectManager={projectManager.current}
+        />
+      )}
+
+      {/* Notification */}
+      {notification && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '12px 20px',
+          borderRadius: '6px',
+          color: '#fff',
+          fontWeight: '500',
+          fontSize: '14px',
+          zIndex: 2000,
+          background: notification.type === 'success' ? '#10b981' : 
+                     notification.type === 'error' ? '#ef4444' : 
+                     notification.type === 'warning' ? '#f59e0b' : '#6b7280',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          transform: 'translateX(0)',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          {notification.message}
+        </div>
+      )}
     </div>
   );
 }
+
+// Project Dialog Component
+const ProjectDialog = ({ action, currentProjectName, onSave, onLoad, onCancel, projectManager }) => {
+  const [projectName, setProjectName] = useState(currentProjectName || '');
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (action === 'load') {
+      setLoading(true);
+      projectManager.getProjectList().then(projectList => {
+        setProjects(projectList);
+        setLoading(false);
+      });
+    }
+  }, [action, projectManager]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (action === 'save' && projectName.trim()) {
+      onSave(projectName.trim());
+    }
+  };
+
+  const handleLoadProject = (projectId) => {
+    onLoad(projectId);
+  };
+
+  const handleDeleteProject = async (projectId, projectName) => {
+    if (confirm(`Are you sure you want to delete "${projectName}"?`)) {
+      const result = await projectManager.deleteProject(projectId);
+      if (result.success) {
+        // Refresh project list
+        const updatedProjects = await projectManager.getProjectList();
+        setProjects(updatedProjects);
+      }
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1500
+    }}>
+      <div style={{
+        background: '#2a2a2a',
+        border: '1px solid #444',
+        borderRadius: '8px',
+        padding: '24px',
+        minWidth: '400px',
+        maxWidth: '600px',
+        maxHeight: '80vh',
+        overflow: 'auto'
+      }}>
+        <h2 style={{ color: '#fff', marginBottom: '20px', fontSize: '18px' }}>
+          {action === 'save' ? '💾 Save Project' : '📁 Load Project'}
+        </h2>
+
+        {action === 'save' && (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ color: '#ccc', display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+                Project Name:
+              </label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="Enter project name..."
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  background: '#1a1a1a',
+                  color: '#fff',
+                  fontSize: '14px'
+                }}
+                autoFocus
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={onCancel}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  background: 'transparent',
+                  color: '#ccc',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!projectName.trim()}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  background: projectName.trim() ? '#8b5cf6' : '#444',
+                  color: '#fff',
+                  cursor: projectName.trim() ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Save Project
+              </button>
+            </div>
+          </form>
+        )}
+
+        {action === 'load' && (
+          <div>
+            {loading ? (
+              <div style={{ color: '#ccc', textAlign: 'center', padding: '20px' }}>
+                Loading projects...
+              </div>
+            ) : projects.length === 0 ? (
+              <div style={{ color: '#ccc', textAlign: 'center', padding: '20px' }}>
+                No saved projects found
+              </div>
+            ) : (
+              <div style={{ marginBottom: '16px' }}>
+                {projects.map(project => (
+                  <div
+                    key={project.id}
+                    style={{
+                      background: '#333',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      padding: '12px',
+                      marginBottom: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      <div style={{ color: '#fff', fontWeight: '500', marginBottom: '4px' }}>
+                        {project.name}
+                      </div>
+                      <div style={{ color: '#999', fontSize: '12px' }}>
+                        {new Date(project.lastModified).toLocaleString()} • 
+                        {project.itemCount} timeline items • {project.sourceCount} source files
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => handleLoadProject(project.id)}
+                        style={{
+                          padding: '6px 12px',
+                          border: 'none',
+                          borderRadius: '4px',
+                          background: '#8b5cf6',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        Load
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProject(project.id, project.name)}
+                        style={{
+                          padding: '6px 8px',
+                          border: '1px solid #ef4444',
+                          borderRadius: '4px',
+                          background: 'transparent',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={onCancel}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  background: 'transparent',
+                  color: '#ccc',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default App; 

@@ -764,12 +764,6 @@ const VideoCanvas = ({
       fabricCanvas.current.setHeight(displayHeight);
     }
     
-    // console.log('Canvas resize:', {
-    //   canvasDimensions: `${CANVAS_WIDTH}x${CANVAS_HEIGHT}`,
-    //   availableSpace: `${availableWidth}x${availableHeight}`,
-    //   displaySize: `${displayWidth}x${displayHeight}`,
-    //   scale: newScale
-    // });
   }, [CANVAS_WIDTH, CANVAS_HEIGHT]);
 
   useEffect(() => {

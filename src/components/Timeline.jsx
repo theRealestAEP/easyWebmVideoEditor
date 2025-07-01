@@ -555,20 +555,54 @@ const Timeline = ({
     
     let finalTime = snappedTime;
     
-    // Only do overlap prevention if not dragging to a new track area and in valid track type
-    if (!isNewTrackArea && isValidTrackType) {
-      // Get items that would be on the same track as our target
+    // ALWAYS do collision detection to prevent invalid placements
+    // Determine the actual track where the item will be placed
+    let actualTargetTrackIndex = targetTrackIndex;
+    let willCreateNewTrack = false;
+    
+    // If dragging to an invalid track type, keep item on its current track
+    if (!isValidTrackType && !isNewTrackArea) {
+      // Find the current track of the dragged item
+      const dragItemTrackAssignments = calculateTrackAssignments(mediaItems);
+      let currentTrackIndex = -1;
+      
+      // Find which track the item is currently on
+      dragItemTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+        if (track.some(item => item.id === dragItem.id)) {
+          currentTrackIndex = trackIndex;
+        }
+      });
+      
+      if (currentTrackIndex === -1) {
+        dragItemTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+          if (track.some(item => item.id === dragItem.id)) {
+            currentTrackIndex = trackIndex + dragItemTrackAssignments.audioTracks.length;
+          }
+        });
+      }
+      
+      if (currentTrackIndex !== -1) {
+        actualTargetTrackIndex = currentTrackIndex;
+      }
+    } else if (isNewTrackArea && isValidTrackType) {
+      // This will create a new track, so no collision detection needed
+      willCreateNewTrack = true;
+    }
+    
+    // ALWAYS perform collision detection unless creating a completely new track
+    if (!willCreateNewTrack) {
+      // Get items that would be on the same track as our actual target
       let sameTrackItems = [];
       
-      if (isDraggingAudio && isInAudioTrackArea) {
+      if (isDraggingAudio && actualTargetTrackIndex < audioTrackCount) {
         // For audio items, check against items on the specific audio track
-        const targetAudioTrackIndex = targetTrackIndex;
+        const targetAudioTrackIndex = actualTargetTrackIndex;
         if (targetAudioTrackIndex < currentTrackAssignments.audioTracks.length) {
           sameTrackItems = currentTrackAssignments.audioTracks[targetAudioTrackIndex];
         }
-      } else if (!isDraggingAudio && !isInAudioTrackArea) {
+      } else if (!isDraggingAudio && actualTargetTrackIndex >= audioTrackCount) {
         // For video items, check against items on the specific video track
-        const targetVideoTrackIndex = targetTrackIndex - audioTrackCount;
+        const targetVideoTrackIndex = actualTargetTrackIndex - audioTrackCount;
         if (targetVideoTrackIndex >= 0 && targetVideoTrackIndex < currentTrackAssignments.videoTracks.length) {
           sameTrackItems = currentTrackAssignments.videoTracks[targetVideoTrackIndex];
         }
@@ -576,93 +610,91 @@ const Timeline = ({
       
       const dragItemEnd = snappedTime + dragItem.duration;
       
-      // Check for time overlaps only with items on the same track
-      const hasTimeOverlap = sameTrackItems.some(item => {
+      // Check for actual overlaps (not just touching)
+      const hasOverlap = sameTrackItems.some(item => {
         const itemEnd = item.startTime + item.duration;
-        return !(snappedTime >= itemEnd || dragItemEnd <= item.startTime);
+        // Allow touching (back-to-back) but prevent overlapping
+        return (snappedTime < itemEnd && dragItemEnd > item.startTime);
       });
       
-      // If there's an overlap, find the nearest valid position (NOT bounce back)
-      if (hasTimeOverlap) {
+      // If there's an actual overlap, try to find a valid adjacent position
+      if (hasOverlap) {
         const sortedItems = sameTrackItems.sort((a, b) => a.startTime - b.startTime);
         
-        // Find all valid positions and choose the closest one
-        const validPositions = [];
+        // Find the best position to place the item without overlapping
+        let bestPosition = snappedTime;
+        let minDistance = Infinity;
         
-        // Option 1: Place at the end of each existing item (side by side)
+        // Option 1: Try placing after each existing item
         sortedItems.forEach(item => {
-          const afterItemPosition = item.startTime + item.duration;
+          const afterPosition = item.startTime + item.duration;
+          const afterEnd = afterPosition + dragItem.duration;
           
-          // Check if this position would conflict with any other item
+          // Check if this position conflicts with any other item
           const wouldConflict = sortedItems.some(otherItem => {
-            if (otherItem.id === item.id) return false; // Skip the same item
-            const dragEnd = afterItemPosition + dragItem.duration;
+            if (otherItem.id === item.id) return false;
             const otherEnd = otherItem.startTime + otherItem.duration;
-            return !(afterItemPosition >= otherEnd || dragEnd <= otherItem.startTime);
+            return (afterPosition < otherEnd && afterEnd > otherItem.startTime);
           });
           
           if (!wouldConflict) {
-            validPositions.push({
-              position: afterItemPosition,
-              distance: Math.abs(afterItemPosition - snappedTime)
-            });
-          }
-        });
-        
-        // Option 2: Place before existing items if there's space
-        sortedItems.forEach(item => {
-          const beforeItemPosition = item.startTime - dragItem.duration;
-          if (beforeItemPosition >= 0) {
-            
-            // Check if this position would conflict with any other item
-            const wouldConflict = sortedItems.some(otherItem => {
-              if (otherItem.id === item.id) return false; // Skip the same item
-              const dragEnd = beforeItemPosition + dragItem.duration;
-              const otherEnd = otherItem.startTime + otherItem.duration;
-              return !(beforeItemPosition >= otherEnd || dragEnd <= otherItem.startTime);
-            });
-            
-            if (!wouldConflict) {
-              validPositions.push({
-                position: beforeItemPosition,
-                distance: Math.abs(beforeItemPosition - snappedTime)
-              });
+            const distance = Math.abs(afterPosition - snappedTime);
+            if (distance < minDistance) {
+              bestPosition = afterPosition;
+              minDistance = distance;
             }
           }
         });
         
-        // Option 3: Place at the very end of all items if no other valid position
-        if (validPositions.length === 0) {
-          const lastEndTime = Math.max(...sortedItems.map(item => item.startTime + item.duration));
-          validPositions.push({
-            position: lastEndTime,
-            distance: Math.abs(lastEndTime - snappedTime)
-          });
-        }
+        // Option 2: Try placing before each existing item
+        sortedItems.forEach(item => {
+          const beforePosition = item.startTime - dragItem.duration;
+          if (beforePosition >= 0) {
+            const beforeEnd = beforePosition + dragItem.duration;
+            
+            // Check if this position conflicts with any other item
+            const wouldConflict = sortedItems.some(otherItem => {
+              if (otherItem.id === item.id) return false;
+              const otherEnd = otherItem.startTime + otherItem.duration;
+              return (beforePosition < otherEnd && beforeEnd > otherItem.startTime);
+            });
+            
+            if (!wouldConflict) {
+              const distance = Math.abs(beforePosition - snappedTime);
+              if (distance < minDistance) {
+                bestPosition = beforePosition;
+                minDistance = distance;
+              }
+            }
+          }
+        });
         
-        // Choose the position with minimum distance
-        if (validPositions.length > 0) {
-          const bestOption = validPositions.reduce((best, current) => 
-            current.distance < best.distance ? current : best
-          );
-          finalTime = bestOption.position;
+        // Only update if we found a valid position that's reasonably close
+        if (minDistance < Infinity && minDistance <= dragItem.duration * 2) {
+          finalTime = bestPosition;
+        } else {
+          // If no good position found, don't move at all
+          return;
         }
       }
     }
     
-    // Update the item position
-    const updatedItems = mediaItems.map(item => 
-      item.id === dragItem.id 
-        ? { 
-            ...item, 
-            startTime: finalTime,
-            // Set forceTrackIndex for both new track areas AND existing tracks
-            forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
-          }
-        : item
-    );
-    
-    onItemsUpdate(updatedItems);
+    // Only update position if it's a valid move
+    if (isValidTrackType || isNewTrackArea) {
+      // Update the item position
+      const updatedItems = mediaItems.map(item => 
+        item.id === dragItem.id 
+          ? { 
+              ...item, 
+              startTime: finalTime,
+              // Set forceTrackIndex only for valid track moves
+              forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
+            }
+          : item
+      );
+      
+      onItemsUpdate(updatedItems);
+    }
   }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems]);
 
   // Handle mouse up
