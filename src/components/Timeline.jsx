@@ -9,7 +9,8 @@ const Timeline = ({
   onPlayPause,
   onItemsUpdate,
   onDurationChange,
-  playbackFrameRate = 15 // Default to 15fps if not provided
+  playbackFrameRate = 15, // Default to 15fps if not provided
+  restoreFileForItem // Function to restore File objects for uploaded media
 }) => {
   const timelineRef = useRef();
   const [isDragging, setIsDragging] = useState(false);
@@ -194,6 +195,7 @@ const Timeline = ({
       const timelineItem = {
         ...sourceItem,
         id: Date.now() + Math.random(), // New ID for timeline
+        sourceId: sourceItem.id, // Keep reference to original source item for File restoration
         startTime: Math.round(dropTime * 10) / 10, // Snap to 0.1s grid
         x: 100, // Default canvas position
         y: 100,
@@ -205,16 +207,19 @@ const Timeline = ({
         forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
       };
       
-      console.log('Creating timeline item:', timelineItem);
+      // Restore File object if this came from uploaded media and we have a restore function
+      const restoredItem = restoreFileForItem ? restoreFileForItem(timelineItem) : timelineItem;
+      
+      console.log('Creating timeline item:', restoredItem);
       
       // Add to timeline
-      const updatedItems = [...mediaItems, timelineItem];
+      const updatedItems = [...mediaItems, restoredItem];
       onItemsUpdate(updatedItems);
       
     } catch (error) {
       console.error('Error handling timeline drop:', error);
     }
-  }, [scale, mediaItems, onItemsUpdate]);
+  }, [scale, mediaItems, onItemsUpdate, restoreFileForItem]);
 
   const handleTimelineDragOver = useCallback((e) => {
     e.preventDefault();
@@ -681,19 +686,19 @@ const Timeline = ({
     
     // Only update position if it's a valid move
     if (isValidTrackType || isNewTrackArea) {
-      // Update the item position
-      const updatedItems = mediaItems.map(item => 
-        item.id === dragItem.id 
-          ? { 
-              ...item, 
-              startTime: finalTime,
+    // Update the item position
+    const updatedItems = mediaItems.map(item => 
+      item.id === dragItem.id 
+        ? { 
+            ...item, 
+            startTime: finalTime,
               // Set forceTrackIndex only for valid track moves
               forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
-            }
-          : item
-      );
-      
-      onItemsUpdate(updatedItems);
+          }
+        : item
+    );
+    
+    onItemsUpdate(updatedItems);
     }
   }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems]);
 
@@ -721,7 +726,7 @@ const Timeline = ({
 
   // Handle mouse wheel for smooth timeline zooming
   const handleWheel = useCallback((e) => {
-    e.preventDefault();
+      e.preventDefault();
     
     const rect = timelineRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -1037,8 +1042,8 @@ const Timeline = ({
           }}
         >
           {/* Playhead handle */}
-          <div style={{
-            position: 'absolute',
+        <div style={{
+          position: 'absolute',
             top: '-1px',
             left: '-3px',
             width: '8px',
@@ -1142,47 +1147,47 @@ const Timeline = ({
         {Math.max(1, trackAssignments.videoTracks.length) && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
           const track = trackAssignments.videoTracks[trackIndex] || [];
           return (
-            <div
-              key={`video-${trackIndex}`}
-              className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
-              style={{
+          <div
+            key={`video-${trackIndex}`}
+            className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
+            style={{
                 height: '50px',
                 borderBottom: '1px solid #2a2a2a',
-                position: 'relative',
+              position: 'relative',
                 background: dragTargetTrack?.index === (trackAssignments.audioTracks.length + trackIndex) && 
                            dragTargetTrack?.canPlaceHere ? 
                            'rgba(139, 92, 246, 0.1)' : 
                            '#1e1e1e'
-              }}
-            >
-              {/* Track label */}
-              <div style={{
-                position: 'absolute',
+            }}
+          >
+            {/* Track label */}
+            <div style={{
+              position: 'absolute',
                 left: '8px',
                 top: '6px',
                 fontSize: '10px',
                 color: '#888',
-                pointerEvents: 'none',
+              pointerEvents: 'none',
                 zIndex: 1,
                 fontWeight: '500'
-              }}>
+            }}>
                 🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
-              </div>
+            </div>
 
-              {/* Track items */}
-              {track.map(item => {
-                const left = item.startTime * scale;
-                const width = item.duration * scale;
-                
-                return (
-                  <div
-                    key={item.id}
-                    className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                    style={{
-                      position: 'absolute',
-                      left: `${left}px`,
+            {/* Track items */}
+            {track.map(item => {
+              const left = item.startTime * scale;
+              const width = item.duration * scale;
+              
+              return (
+                <div
+                  key={item.id}
+                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}px`,
                       top: '18px',
-                      width: `${width}px`,
+                    width: `${width}px`,
                       height: '28px',
                       background: selectedItems.has(item.id) ? 
                                  '#8b5cf6' : 
@@ -1190,35 +1195,35 @@ const Timeline = ({
                       border: selectedItems.has(item.id) ? 
                              '2px solid #a855f7' : 
                              '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
                       padding: '0 6px',
-                      cursor: 'pointer',
-                      overflow: 'hidden',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
                       fontSize: '10px',
-                      color: '#fff',
+                    color: '#fff',
                       userSelect: 'none',
                       boxShadow: selectedItems.has(item.id) ? 
                                 '0 2px 4px rgba(139, 92, 246, 0.3)' : 
                                 '0 1px 2px rgba(0,0,0,0.2)'
-                    }}
-                    onMouseDown={(e) => handleItemMouseDown(e, item)}
-                    onContextMenu={(e) => handleContextMenu(e, item)}
+                  }}
+                  onMouseDown={(e) => handleItemMouseDown(e, item)}
+                  onContextMenu={(e) => handleContextMenu(e, item)}
                     onClick={(e) => e.stopPropagation()}
-                  >
-                    <span style={{ 
-                      whiteSpace: 'nowrap', 
-                      overflow: 'hidden', 
-                      textOverflow: 'ellipsis',
+                >
+                  <span style={{ 
+                    whiteSpace: 'nowrap', 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
                       fontWeight: '500'
-                    }}>
-                      {item.name}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                  }}>
+                    {item.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
           );
         })}
 

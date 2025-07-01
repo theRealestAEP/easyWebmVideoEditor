@@ -36,11 +36,14 @@ function App() {
   const projectManager = useRef(new ProjectManager());
   const lastStateRef = useRef(null);
 
+  // Store File objects separately to preserve them during drag/drop
+  const sourceFileMap = useRef(new Map());
+
   // Calculate total duration based on media items
   const calculateDuration = useCallback(() => {
-    if (mediaItems.length === 0) return 10; // Small default when no media
+    if (mediaItems.length === 0) return 10; // Default when no media
     const maxEndTime = Math.max(...mediaItems.map(item => item.startTime + item.duration));
-    return Math.max(maxEndTime, 5); // Minimum 5 seconds, no arbitrary buffer
+    return maxEndTime + 0.1; // Just a tiny buffer to prevent edge cases, no artificial minimum
   }, [mediaItems]);
 
   // Update duration when media items change
@@ -52,14 +55,25 @@ function App() {
   }, [mediaItems, calculateDuration, duration]);
 
   // Get current app state for project management
-  const getCurrentState = useCallback(() => ({
-    mediaItems,
-    sourceMedia,
-    currentTime,
-    duration,
-    settings,
-    selectedItem
-  }), [mediaItems, sourceMedia, currentTime, duration, settings, selectedItem]);
+  const getCurrentState = useCallback(() => {
+    // Create a clean version of sourceMedia without File objects for saving
+    const cleanSourceMedia = sourceMedia.map(item => {
+      const { file, ...cleanItem } = item;
+      return {
+        ...cleanItem,
+        hasFile: !!file // Keep track of whether this item had a file
+      };
+    });
+
+    return {
+      mediaItems,
+      sourceMedia: cleanSourceMedia,
+      currentTime,
+      duration,
+      settings,
+      selectedItem
+    };
+  }, [mediaItems, sourceMedia, currentTime, duration, settings, selectedItem]);
 
   // Push state to undo stack when significant changes occur
   const pushUndoState = useCallback(() => {
@@ -128,27 +142,65 @@ function App() {
         if (fileType === 'image/gif') {
           subtype = 'gif';
           duration = await getGifDuration(file);
+        } else {
+          duration = 5; // Default for static images
         }
       } else if (fileType.startsWith('audio/')) {
         mediaType = 'audio';
         duration = await getAudioDuration(file);
       }
       
+      const itemId = Date.now() + Math.random();
+      
       const sourceItem = {
-        id: Date.now() + Math.random(),
+        id: itemId,
         name: file.name,
-        file: file,
         type: mediaType,
         subtype: subtype,
         duration: duration,
-        url: URL.createObjectURL(file)
+        url: URL.createObjectURL(file),
+        hasFile: true,
+        file: file // Keep File object for direct access
       };
+      
+      // Store the File object in the map for drag-and-drop restoration
+      sourceFileMap.current.set(itemId, file);
       
       newSourceMedia.push(sourceItem);
       console.log('Added to source media:', sourceItem.name, sourceItem.type, sourceItem.duration);
     }
     
     setSourceMedia(prev => [...prev, ...newSourceMedia]);
+  }, []);
+
+  // Process individual media file into PNG sequence
+  const processMediaFile = useCallback(async (sourceItem, file) => {
+    try {
+      console.log('Starting frame extraction for:', sourceItem.name, 'Has file object:', !!sourceItem.file);
+      
+      // Extract frames using MediaProcessor with the sourceItem that includes the File object
+      const frameData = await videoComposer.current.extractFrames(sourceItem);
+      
+      console.log('Frame extraction completed for:', sourceItem.name);
+      
+      // Update source media item with frame data
+      setSourceMedia(prev => prev.map(item => 
+        item.id === sourceItem.id 
+          ? { ...item, frameData, isProcessing: false }
+          : item
+      ));
+      
+    } catch (error) {
+      console.error('Processing failed for:', sourceItem.name, error);
+      
+      // Update source media to mark processing as failed
+      setSourceMedia(prev => prev.map(item => 
+        item.id === sourceItem.id 
+          ? { ...item, isProcessing: false, processingError: error.message }
+          : item
+      ));
+      
+    }
   }, []);
 
   // Add drag and drop support to the main app
@@ -322,6 +374,23 @@ function App() {
     setMediaItems(items);
   }, []);
 
+  // Function to restore File objects for timeline items created from source media
+  const restoreFileForItem = useCallback((item) => {
+    if (item.hasFile) {
+      // Use sourceId if available (for timeline items), otherwise use the item's own id (for source items)
+      const sourceId = item.sourceId || item.id;
+      const restoredItem = { ...item };
+      
+      // Restore File object
+      if (sourceFileMap.current.has(sourceId)) {
+        restoredItem.file = sourceFileMap.current.get(sourceId);
+      }
+      
+      return restoredItem;
+    }
+    return item;
+  }, []);
+
   const handleItemUpdate = useCallback((item) => {
     setMediaItems(prev => 
       prev.map(i => i.id === item.id ? { ...i, ...item } : i)
@@ -436,6 +505,16 @@ function App() {
   }, [mediaItems, duration, settings]);
 
   const handleClear = useCallback(() => {
+    // Clean up blob URLs before clearing
+    sourceMedia.forEach(item => {
+      if (item.url && item.url.startsWith('blob:')) {
+        URL.revokeObjectURL(item.url);
+      }
+    });
+    
+    // Clear the source file map
+    sourceFileMap.current.clear();
+    
     setMediaItems([]);
     setSourceMedia([]);
     setCurrentTime(0);
@@ -444,7 +523,7 @@ function App() {
     
     // Push state for undo
     setTimeout(pushUndoState, 100);
-  }, [pushUndoState]);
+  }, [sourceMedia, pushUndoState]);
 
   // Handle Tenor GIF selection
   const handleTenorGifSelect = useCallback((gifMediaItem) => {
@@ -460,21 +539,16 @@ function App() {
     
     const previousState = projectManager.current.undo(getCurrentState());
     if (previousState) {
-      // We need to restore files for source media items that have them
-      const restoredSourceMedia = await Promise.all(
-        previousState.sourceMedia.map(async (item) => {
-          if (item.file && item.file.name) {
-            // Find the file in current source media
-            const currentItem = sourceMedia.find(current => 
-              current.id === item.id && current.file && current.file.name === item.file.name
-            );
-            if (currentItem && currentItem.file) {
-              return { ...item, file: currentItem.file };
-            }
-          }
-          return item;
-        })
-      );
+      // Restore File objects for source media items from our file map
+      const restoredSourceMedia = previousState.sourceMedia.map(item => {
+        if (item.hasFile && sourceFileMap.current.has(item.id)) {
+          return {
+            ...item,
+            file: sourceFileMap.current.get(item.id)
+          };
+        }
+        return item;
+      });
       
       setMediaItems(previousState.mediaItems);
       setSourceMedia(restoredSourceMedia);
@@ -485,7 +559,7 @@ function App() {
       
       showNotification('Undo successful');
     }
-  }, [getCurrentState, sourceMedia, showNotification]);
+  }, [getCurrentState, showNotification]);
 
   // Redo functionality  
   const handleRedo = useCallback(async () => {
@@ -493,20 +567,16 @@ function App() {
     
     const nextState = projectManager.current.redo();
     if (nextState) {
-      // Restore files similar to undo
-      const restoredSourceMedia = await Promise.all(
-        nextState.sourceMedia.map(async (item) => {
-          if (item.file && item.file.name) {
-            const currentItem = sourceMedia.find(current => 
-              current.id === item.id && current.file && current.file.name === item.file.name
-            );
-            if (currentItem && currentItem.file) {
-              return { ...item, file: currentItem.file };
-            }
-          }
-          return item;
-        })
-      );
+      // Restore File objects for source media items from our file map
+      const restoredSourceMedia = nextState.sourceMedia.map(item => {
+        if (item.hasFile && sourceFileMap.current.has(item.id)) {
+          return {
+            ...item,
+            file: sourceFileMap.current.get(item.id)
+          };
+        }
+        return item;
+      });
       
       setMediaItems(nextState.mediaItems);
       setSourceMedia(restoredSourceMedia);
@@ -517,7 +587,7 @@ function App() {
       
       showNotification('Redo successful');
     }
-  }, [sourceMedia, showNotification]);
+  }, [showNotification]);
 
   // Save project
   const handleSaveProject = useCallback(async (projectName) => {
@@ -541,8 +611,27 @@ function App() {
     if (result.success) {
       const project = result.project;
       
+      // Check for source media items that need File objects restored
+      const sourceMediaWithFiles = project.sourceMedia?.map(item => {
+        if (item.hasFile && sourceFileMap.current.has(item.id)) {
+          // File object still available in memory
+          return {
+            ...item,
+            file: sourceFileMap.current.get(item.id)
+          };
+        } else if (item.hasFile) {
+          // File object not available - mark as needing re-import
+          return {
+            ...item,
+            needsReimport: true,
+            processingError: 'File needs to be re-imported'
+          };
+        }
+        return item;
+      }) || [];
+      
       setMediaItems(project.mediaItems || []);
-      setSourceMedia(project.sourceMedia || []);
+      setSourceMedia(sourceMediaWithFiles);
       setCurrentTime(project.currentTime || 0);
       setDuration(project.duration || 30);
       setSettings(project.settings || settings);
@@ -556,9 +645,9 @@ function App() {
       showNotification(`Project "${project.name}" loaded successfully!`, 'success');
       
       // Check for files that need to be re-imported
-      const missingFiles = project.sourceMedia.filter(item => item.needsReimport || item.isMissingFile);
+      const missingFiles = sourceMediaWithFiles.filter(item => item.needsReimport || item.processingError);
       if (missingFiles.length > 0) {
-        showNotification(`${missingFiles.length} large files need to be re-imported`, 'warning');
+        showNotification(`${missingFiles.length} uploaded file${missingFiles.length > 1 ? 's' : ''} need${missingFiles.length > 1 ? '' : 's'} to be re-imported. Use "Add Media" to upload them again.`, 'warning');
       }
     } else {
       showNotification(`Failed to load project: ${result.error}`, 'error');
@@ -774,6 +863,19 @@ function App() {
     }
   }, [sourceMedia, generateThumbnail]);
 
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up all blob URLs when component unmounts
+      sourceMedia.forEach(item => {
+        if (item.url && item.url.startsWith('blob:')) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      sourceFileMap.current.clear();
+    };
+  }, []); // Empty dependency array means this only runs on unmount
+
   return (
     <div className="app"
       onDrop={handleDrop}
@@ -882,7 +984,7 @@ function App() {
                   <div
                     key={item.id}
                     className="source-media-item"
-                    draggable
+                    draggable={true}
                     onDragStart={(e) => handleSourceDragStart(e, item)}
                     style={{
                       background: '#333',
@@ -895,7 +997,8 @@ function App() {
                       alignItems: 'center',
                       gap: '6px',
                       minHeight: '80px',
-                      transition: 'all 0.2s ease'
+                      transition: 'all 0.2s ease',
+                      position: 'relative'
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = '#404040';
@@ -1003,6 +1106,7 @@ function App() {
             onItemsUpdate={handleTimelineUpdate}
             onDurationChange={setDuration}
             playbackFrameRate={settings.exportFrameRate}
+            restoreFileForItem={restoreFileForItem}
           />
         </div>
       </div>

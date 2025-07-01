@@ -32,6 +32,7 @@ const VideoCanvas = ({
   const [scale, setScale] = useState(1);
   const [processingStatus, setProcessingStatus] = useState('');
   const [queueStatus, setQueueStatus] = useState({ queueLength: 0, isProcessing: false, totalInProgress: 0 });
+  const [rescalingStatus, setRescalingStatus] = useState(''); // Track background rescaling
   const fabricObjects = useRef(new Map()); // Track fabric objects by media item ID
   const mediaProcessors = useRef(new Map()); // Frame-based processors
   const animationFrame = useRef();
@@ -39,6 +40,8 @@ const VideoCanvas = ({
   const lastUpdateTime = useRef(Date.now());
   const [isDragging, setIsDragging] = useState(false);
   const previousCanvasDimensions = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+  const rescalingQueue = useRef(new Map()); // Track items pending rescaling
+  const rescalingTimeouts = useRef(new Map()); // Debounce rescaling triggers
 
   // Detect rapid updates (drag operations)
   useEffect(() => {
@@ -67,32 +70,6 @@ const VideoCanvas = ({
     }
   }, [isDragging]);
 
-  // Update queue status periodically
-  useEffect(() => {
-    const updateQueueStatus = () => {
-      const status = mediaProcessor.current.getQueueStatus();
-      setQueueStatus(status);
-      
-      if (status.totalInProgress > 0) {
-        // Only update if we don't already have a specific progress message
-        if (!processingStatus.includes('(') && !processingStatus.includes('%')) {
-          setProcessingStatus(`Processing ${status.totalInProgress} file${status.totalInProgress > 1 ? 's' : ''}...`);
-        }
-      } else if (status.totalInProgress === 0) {
-        // Clear any processing-related messages when queue is empty
-        if (processingStatus.includes('Processing') || 
-            processingStatus.includes('Frames extracted') || 
-            processingStatus.includes('Analyzing') ||
-            processingStatus.includes('(100%)')) {
-          setProcessingStatus('');
-        }
-      }
-    };
-
-    const interval = setInterval(updateQueueStatus, 500);
-    return () => clearInterval(interval);
-  }, [processingStatus]);
-
   // Process media item and extract frames
   const processMediaItem = useCallback(async (item) => {
     if (mediaProcessors.current.has(item.id)) {
@@ -102,20 +79,35 @@ const VideoCanvas = ({
     console.log('🎬 Processing media item:', item.name);
 
     try {
-      const frameData = await mediaProcessor.current.extractFrames(
-        item,
-        (progress, status) => {
-          setProcessingStatus(`${status} (${Math.round(progress)}%)`);
-        }
-      );
-
-      const processor = mediaProcessor.current.createProcessor(item, frameData);
+      let frameData;
+      let processor;
+      
+      // Check if we have pre-processed frame data (from uploaded files)
+      if (item.isPreProcessed && item.frameData) {
+        console.log('✅ Using pre-processed frame data for:', item.name);
+        frameData = item.frameData;
+        processor = mediaProcessor.current.createProcessor(item, frameData);
+        
+        // No progress updates needed for pre-processed data
+      } else {
+        // Fall back to on-demand processing (for Tenor stickers, etc.)
+        console.log('🔄 Processing frames on-demand for:', item.name);
+        frameData = await mediaProcessor.current.extractFrames(
+          item,
+          (progress, status) => {
+            setProcessingStatus(`${status} (${Math.round(progress)}%)`);
+          }
+        );
+        processor = mediaProcessor.current.createProcessor(item, frameData);
+      }
+      
       mediaProcessors.current.set(item.id, processor);
       
       console.log('✅ Media processed successfully:', item.name, 
                  'Frames:', frameData.frameCount, 
                  'Actual duration:', frameData.duration,
-                 'Original duration:', item.duration);
+                 'Original duration:', item.duration,
+                 'Pre-processed:', !!item.isPreProcessed);
       
       // Update the media item with the actual duration from frame extraction
       if (Math.abs(frameData.duration - item.duration) > 0.1) { // Only update if significantly different
@@ -126,11 +118,8 @@ const VideoCanvas = ({
       
       // Clear processing status after successful completion
       setTimeout(() => {
-        const currentStatus = mediaProcessor.current.getQueueStatus();
-        if (currentStatus.totalInProgress === 0) {
-          setProcessingStatus('');
-        }
-      }, 1000); // Give a brief moment to show completion, then clear
+        setProcessingStatus('');
+      }, 500);
       
       return processor;
     } catch (error) {
@@ -141,7 +130,60 @@ const VideoCanvas = ({
     }
   }, [onItemUpdate]);
 
-  // Get current frame image element with actual PNG scaling
+  // Trigger background rescaling when user finishes resizing
+  const triggerRescaling = useCallback((mediaItem, newWidth, newHeight) => {
+    const itemId = mediaItem.id;
+    
+    // Clear any existing timeout for this item
+    if (rescalingTimeouts.current.has(itemId)) {
+      clearTimeout(rescalingTimeouts.current.get(itemId));
+    }
+    
+    // Set new timeout to trigger rescaling after user stops resizing
+    const timeout = setTimeout(async () => {
+      try {
+        console.log(`🎯 Triggering background rescaling for ${mediaItem.name} to ${newWidth}x${newHeight}`);
+        
+        // Check if frames are already at target size
+        if (mediaProcessor.current.areFramesPreScaled(itemId, newWidth, newHeight)) {
+          console.log('Frames already pre-scaled to target size, skipping rescaling');
+          return;
+        }
+        
+        // Add to rescaling queue
+        rescalingQueue.current.set(itemId, { mediaItem, newWidth, newHeight });
+        setRescalingStatus(`Rescaling ${mediaItem.name}...`);
+        
+        // Start rescaling
+        await mediaProcessor.current.rescaleFrames(
+          itemId,
+          newWidth,
+          newHeight,
+          (progress, status) => {
+            setRescalingStatus(`${status} (${Math.round(progress)}%)`);
+          }
+        );
+        
+        // Remove from queue and clear status
+        rescalingQueue.current.delete(itemId);
+        setRescalingStatus('');
+        
+        console.log(`✅ Background rescaling complete for ${mediaItem.name}`);
+        
+      } catch (error) {
+        console.error('Background rescaling failed:', error);
+        rescalingQueue.current.delete(itemId);
+        setRescalingStatus('');
+      }
+      
+      // Clean up timeout reference
+      rescalingTimeouts.current.delete(itemId);
+    }, 1000); // Wait 1 second after user stops resizing
+    
+    rescalingTimeouts.current.set(itemId, timeout);
+  }, []);
+
+  // Get current frame image element with pre-scaled frames when available
   const getCurrentFrameImage = useCallback((item, relativeTime) => {
     const processor = mediaProcessors.current.get(item.id);
     if (!processor) {
@@ -169,13 +211,25 @@ const VideoCanvas = ({
       originalImg.src = frame.url;
       originalImg.crossOrigin = 'anonymous';
       
-      // Check if we need to scale the PNG
+      // Check if we have pre-scaled frames at the target size
+      const targetWidth = Math.round(item.width);
+      const targetHeight = Math.round(item.height);
+      
+      if (frame.isPreScaled && 
+          frame.scaledWidth === targetWidth && 
+          frame.scaledHeight === targetHeight) {
+        // Use pre-scaled frame directly - no additional scaling needed!
+        console.log('Using pre-scaled frame for:', item.name, `${targetWidth}x${targetHeight}`);
+        return originalImg;
+      }
+      
+      // Fall back to on-the-fly scaling (during transition or if no pre-scaling)
       if (originalImg.complete) {
-        return createScaledImage(originalImg, item.width, item.height);
+        return createScaledImage(originalImg, targetWidth, targetHeight);
       } else {
         return new Promise((resolve) => {
           originalImg.onload = () => {
-            resolve(createScaledImage(originalImg, item.width, item.height));
+            resolve(createScaledImage(originalImg, targetWidth, targetHeight));
           };
         });
       }
@@ -297,6 +351,15 @@ const VideoCanvas = ({
         
         canvas.renderAll();
         
+        // Trigger background rescaling if dimensions changed significantly
+        const widthChanged = Math.abs(actualWidth - item.width) > 5;
+        const heightChanged = Math.abs(actualHeight - item.height) > 5;
+        
+        if ((widthChanged || heightChanged) && (item.type === 'video' || item.type === 'image')) {
+          console.log('🔄 Scheduling background rescaling for:', item.name);
+          triggerRescaling(updatedItem, Math.round(actualWidth), Math.round(actualHeight));
+        }
+        
         // Update the stored media item AFTER fabric object is updated
         // Use setTimeout to prevent immediate re-render interference
         setTimeout(() => {
@@ -340,6 +403,11 @@ const VideoCanvas = ({
       // Clean up processors
       mediaProcessors.current.clear();
       fabricObjects.current.clear();
+      
+      // Clean up rescaling timeouts
+      rescalingTimeouts.current.forEach(timeout => clearTimeout(timeout));
+      rescalingTimeouts.current.clear();
+      rescalingQueue.current.clear();
     };
   }, [onItemSelect, onItemUpdate]);
 
@@ -795,6 +863,14 @@ const VideoCanvas = ({
 
   return (
     <div ref={containerRef} className="canvas-area">
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
       <div style={{
         width: displaySize.width,
         height: displaySize.height,
@@ -852,6 +928,36 @@ const VideoCanvas = ({
                 Queue: {queueStatus.queueLength} waiting
               </div>
             )}
+          </div>
+        )}
+        
+        {rescalingStatus && (
+          <div style={{
+            position: 'absolute',
+            top: '70%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(139, 92, 246, 0.9)', // Purple background for rescaling
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            textAlign: 'center',
+            pointerEvents: 'none',
+            minWidth: '180px',
+            border: '1px solid rgba(139, 92, 246, 0.3)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ 
+                width: '12px', 
+                height: '12px', 
+                border: '2px solid #fff', 
+                borderTop: '2px solid transparent',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite' 
+              }}></div>
+              {rescalingStatus}
+            </div>
           </div>
         )}
         
