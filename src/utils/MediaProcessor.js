@@ -73,7 +73,7 @@ export class MediaProcessor {
       console.log('Using native browser processing for MP4:', mediaItem.name);
       return await this.extractFramesNative(mediaItem, onProgress);
     }
-
+    
     await this.initialize();
     
     try {
@@ -303,7 +303,7 @@ export class MediaProcessor {
     // These defaults should work for most media types
     const mediaInfo = {
       duration: 3.0, // Default duration
-      fps: 10, // Default frame rate  
+      fps: 10, // Default frame rate
       width: 400,
       height: 300
     };
@@ -414,13 +414,13 @@ export class MediaProcessor {
         console.log('Trying ultra-simple MP4 fallback...');
         try {
           const ultraSimpleArgs = [
-            '-i', inputFileName,
+      '-i', inputFileName,
             '-vf', 'fps=5,scale=320:240', // Very low resolution and FPS
             '-vframes', '50', // Very limited frames
             '-f', 'image2',
             '-pix_fmt', 'rgb24',
             '-y',
-            outputPattern
+      outputPattern
           ];
           
           console.log('Ultra-simple fallback command:', ultraSimpleArgs.join(' '));
@@ -457,28 +457,28 @@ export class MediaProcessor {
             console.warn('Empty frame data for:', frameName);
             break;
           }
-          
-          // Convert to blob URL
-          const blob = new Blob([frameData.buffer], { type: 'image/png' });
-          const frameUrl = URL.createObjectURL(blob);
-          
-          frames.push({
-            index: frameIndex - 1,
-            url: frameUrl,
-            timestamp: (frameIndex - 1) / targetFPS
-          });
-          
-          // Clean up frame file immediately after reading
-          try {
-            await this.ffmpeg.deleteFile(frameName);
+        
+        // Convert to blob URL
+        const blob = new Blob([frameData.buffer], { type: 'image/png' });
+        const frameUrl = URL.createObjectURL(blob);
+        
+        frames.push({
+          index: frameIndex - 1,
+          url: frameUrl,
+          timestamp: (frameIndex - 1) / targetFPS
+        });
+        
+        // Clean up frame file immediately after reading
+        try {
+          await this.ffmpeg.deleteFile(frameName);
           } catch (deleteError) {
             console.warn('Could not delete frame file:', frameName, deleteError);
-          }
-          
-          frameIndex++;
-          
-          // Update progress
-          if (onProgress && frameIndex % 5 === 0) {
+        }
+        
+        frameIndex++;
+        
+        // Update progress
+        if (onProgress && frameIndex % 5 === 0) {
             onProgress(20 + (frameIndex * 60 / 100), `Processed ${frameIndex} frames for ${mediaItem.name}...`);
           }
           
@@ -521,14 +521,14 @@ export class MediaProcessor {
     try {
       console.log('Extracting static frame for:', inputFileName, 'Output:', outputName);
       
-      // Convert to PNG with unique name
+    // Convert to PNG with unique name
       const ffmpegArgs = [
-        '-i', inputFileName,
-        '-vframes', '1', // Extract only 1 frame
+      '-i', inputFileName,
+      '-vframes', '1', // Extract only 1 frame
         '-f', 'image2', // Force image output format
         '-pix_fmt', 'rgba', // Use RGBA for transparency support
         '-y', // Overwrite output files
-        outputName
+      outputName
       ];
       
       console.log('FFmpeg static frame command:', ffmpegArgs.join(' '));

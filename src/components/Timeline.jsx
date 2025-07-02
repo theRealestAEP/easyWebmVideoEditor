@@ -27,6 +27,226 @@ const Timeline = ({
   const dragStartMouseX = useRef(null); // Store mouse X when multi-select drag starts
   const dragStartPositions = useRef(new Map()); // Store original positions when multi-select drag starts
 
+  // Drag-to-select state
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionBox, setSelectionBox] = useState(null);
+  const selectStartPos = useRef({ x: 0, y: 0 });
+
+  // Scrubbing state for timeline ruler
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [rulerMouseDown, setRulerMouseDown] = useState(false);
+  const rulerMouseDownPos = useRef({ x: 0, y: 0 });
+
+  // Calculate which track each item should be on (avoiding overlaps) - MOVED EARLY
+  const calculateTrackAssignments = useCallback((items) => {
+    // Separate audio and video items
+    const audioItems = items.filter(item => item.type === 'audio');
+    const videoItems = items.filter(item => item.type !== 'audio');
+    
+    const audioTracks = [];
+    const videoTracks = [];
+    
+    // Process video items FIRST (since they appear first in UI)
+    const sortedVideoItems = [...videoItems].sort((a, b) => a.startTime - b.startTime);
+    sortedVideoItems.forEach(item => {
+      const itemEnd = item.startTime + item.duration;
+      
+      // Handle forced track assignments for video items
+      if (item.forceTrackIndex !== undefined) {
+        const targetTrack = item.forceTrackIndex;
+        
+        // For video items, forceTrackIndex directly maps to video track index
+        // (since video tracks are first in the UI)
+        if (targetTrack >= 0) {
+          // Ensure we have enough video tracks
+          while (videoTracks.length <= targetTrack) {
+            videoTracks.push([]);
+          }
+          
+          videoTracks[targetTrack].push({ ...item, trackIndex: targetTrack, trackType: 'video', forceTrackIndex: undefined });
+          return;
+        }
+      }
+      
+      // Find the first video track where this item fits without overlap
+      let assignedTrack = -1;
+      for (let trackIndex = 0; trackIndex < videoTracks.length; trackIndex++) {
+        const track = videoTracks[trackIndex];
+        const hasOverlap = track.some(trackItem => {
+          const trackItemEnd = trackItem.startTime + trackItem.duration;
+          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
+        });
+        
+        if (!hasOverlap) {
+          assignedTrack = trackIndex;
+          break;
+        }
+      }
+      
+      // If no existing track works, create a new one
+      if (assignedTrack === -1) {
+        assignedTrack = videoTracks.length;
+        videoTracks.push([]);
+      }
+      
+      videoTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'video', forceTrackIndex: undefined });
+    });
+    
+    // Process audio items SECOND (since they appear after video tracks in UI)
+    const sortedAudioItems = [...audioItems].sort((a, b) => a.startTime - b.startTime);
+    sortedAudioItems.forEach(item => {
+      const itemEnd = item.startTime + item.duration;
+      
+      // Handle forced track assignments for audio items
+      if (item.forceTrackIndex !== undefined) {
+        const targetTrack = item.forceTrackIndex;
+        
+        // For audio items, forceTrackIndex needs to be converted to audio track index
+        // by subtracting the number of video tracks (since video tracks come first in UI)
+        const videoTrackCount = Math.max(1, videoTracks.length); // Always show at least 1 video track
+        const audioTrackIndex = targetTrack - videoTrackCount;
+        
+        // Only assign if targeting audio track area (after video tracks)
+        if (audioTrackIndex >= 0) {
+          // Ensure we have enough audio tracks
+          while (audioTracks.length <= audioTrackIndex) {
+            audioTracks.push([]);
+          }
+          
+          audioTracks[audioTrackIndex].push({ ...item, trackIndex: audioTrackIndex, trackType: 'audio', forceTrackIndex: undefined });
+          return;
+        }
+      }
+      
+      // Find the first audio track where this item fits without overlap
+      let assignedTrack = -1;
+      for (let trackIndex = 0; trackIndex < audioTracks.length; trackIndex++) {
+        const track = audioTracks[trackIndex];
+        const hasOverlap = track.some(trackItem => {
+          const trackItemEnd = trackItem.startTime + trackItem.duration;
+          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
+        });
+        
+        if (!hasOverlap) {
+          assignedTrack = trackIndex;
+          break;
+        }
+      }
+      
+      // If no existing track works, create a new one
+      if (assignedTrack === -1) {
+        assignedTrack = audioTracks.length;
+        audioTracks.push([]);
+      }
+      
+      audioTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'audio', forceTrackIndex: undefined });
+    });
+    
+    // Clean up empty tracks and reorganize
+    const cleanedVideoTracks = videoTracks.filter(track => track.length > 0);
+    const cleanedAudioTracks = audioTracks.filter(track => track.length > 0);
+    
+    // Function to check for overlaps within a track
+    const checkTrackOverlaps = (track) => {
+      for (let i = 0; i < track.length; i++) {
+        for (let j = i + 1; j < track.length; j++) {
+          const item1 = track[i];
+          const item2 = track[j];
+          const item1End = item1.startTime + item1.duration;
+          const item2End = item2.startTime + item2.duration;
+          
+          // Check if items overlap
+          if (!(item1.startTime >= item2End || item1End <= item2.startTime)) {
+            return { hasOverlap: true, item1, item2 };
+          }
+        }
+      }
+      return { hasOverlap: false };
+    };
+    
+    // Function to resolve overlaps by moving items to new tracks
+    const resolveOverlaps = (tracks, trackType) => {
+      let resolvedTracks = [...tracks];
+      let changed = true;
+      
+      while (changed) {
+        changed = false;
+        
+        for (let trackIndex = 0; trackIndex < resolvedTracks.length; trackIndex++) {
+          const track = resolvedTracks[trackIndex];
+          const overlapResult = checkTrackOverlaps(track);
+          
+          if (overlapResult.hasOverlap) {
+            // Move the second overlapping item to a new track
+            const itemToMove = overlapResult.item2;
+            
+            // Remove from current track
+            resolvedTracks[trackIndex] = track.filter(item => item.id !== itemToMove.id);
+            
+            // Find an existing track where it fits, or create a new one
+            let newTrackIndex = -1;
+            for (let i = 0; i < resolvedTracks.length; i++) {
+              const candidateTrack = resolvedTracks[i];
+              const itemEnd = itemToMove.startTime + itemToMove.duration;
+              
+              const wouldOverlap = candidateTrack.some(existingItem => {
+                const existingEnd = existingItem.startTime + existingItem.duration;
+                return !(itemToMove.startTime >= existingEnd || itemEnd <= existingItem.startTime);
+              });
+              
+              if (!wouldOverlap) {
+                newTrackIndex = i;
+                break;
+              }
+            }
+            
+            if (newTrackIndex === -1) {
+              // Create new track
+              newTrackIndex = resolvedTracks.length;
+              resolvedTracks.push([]);
+            }
+            
+            // Add item to new track
+            resolvedTracks[newTrackIndex].push(itemToMove);
+            
+            changed = true;
+            break; // Restart the checking process
+          }
+        }
+      }
+      
+      return resolvedTracks;
+    };
+    
+    // Resolve overlaps in both video and audio tracks
+    const finalVideoTracks = resolveOverlaps(cleanedVideoTracks, 'video');
+    const finalAudioTracks = resolveOverlaps(cleanedAudioTracks, 'audio');
+    
+    // Update track indices after cleanup and overlap resolution
+    finalVideoTracks.forEach((track, trackIndex) => {
+      track.forEach(item => {
+        item.trackIndex = trackIndex;
+        // Clear forceTrackIndex after assignment
+        delete item.forceTrackIndex;
+      });
+    });
+    
+    finalAudioTracks.forEach((track, trackIndex) => {
+      track.forEach(item => {
+        item.trackIndex = trackIndex;
+        // Clear forceTrackIndex after assignment
+        delete item.forceTrackIndex;
+      });
+    });
+    
+    console.log('Track assignments - Video tracks:', finalVideoTracks.length, 'Audio tracks:', finalAudioTracks.length);
+    
+    return { videoTracks: finalVideoTracks, audioTracks: finalAudioTracks };
+  }, []);
+
+  // Get track assignments for current media items
+  const trackAssignments = calculateTrackAssignments(mediaItems);
+
   // Playback timer
   useEffect(() => {
     if (isPlaying) {
@@ -130,6 +350,11 @@ const Timeline = ({
       );
       
       if (isMajorMarker) {
+        // For timeline ruler, show only whole seconds for cleaner display
+        const wholeSeconds = Math.floor(time);
+        const minutes = Math.floor(wholeSeconds / 60);
+        const seconds = wholeSeconds % 60;
+        
         markers.push(
           <div
             key={`label-${time}`}
@@ -143,7 +368,7 @@ const Timeline = ({
               fontFamily: 'monospace'
             }}
           >
-            {Math.floor(time / 60)}:{(time % 60).toString().padStart(2, '0')}
+            {minutes}:{seconds.toString().padStart(2, '0')}
           </div>
         );
       }
@@ -154,7 +379,7 @@ const Timeline = ({
 
   // Handle timeline click for scrubbing
   const handleTimelineClick = useCallback((e) => {
-    if (isDragging) return;
+    if (isDragging || isSelecting || isScrubbing) return;
     
     const rect = timelineRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -163,7 +388,146 @@ const Timeline = ({
     
     // Deselect all items when clicking on empty timeline
     setSelectedItems(new Set());
+  }, [scale, duration, onTimeUpdate, isDragging, isSelecting, isScrubbing]);
+
+  // Handle mouse down for scrubbing in timeline ruler
+  const handleRulerMouseDown = useCallback((e) => {
+    // Don't start scrubbing if already dragging items
+    if (isDragging) return;
+
+    const rect = timelineRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const newTime = Math.max(0, Math.min(duration, clickX / scale));
+    onTimeUpdate(newTime);
+    
+    // Track that mouse is down in ruler and store position
+    setRulerMouseDown(true);
+    rulerMouseDownPos.current = { x: e.clientX, y: e.clientY };
+    
+    // Deselect all items when starting to interact with ruler
+    setSelectedItems(new Set());
+
+    // Prevent default to avoid text selection
+    e.preventDefault();
   }, [scale, duration, onTimeUpdate, isDragging]);
+
+  // Handle mouse down for drag-to-select (works in both ruler and tracks)
+  const handleTimelineMouseDown = useCallback((e) => {
+    // Only start selection if not clicking on an item and not already dragging
+    if (isDragging || e.target.classList.contains('timeline-item') || 
+        e.target.closest('.timeline-item')) {
+      return;
+    }
+
+    const rect = timelineRef.current.getBoundingClientRect();
+    const startX = e.clientX - rect.left;
+    const startY = e.clientY - rect.top;
+
+    selectStartPos.current = { x: startX, y: startY };
+    setIsSelecting(true);
+    setSelectionBox({ x: startX, y: startY, width: 0, height: 0 });
+
+    // Prevent default to avoid text selection
+    e.preventDefault();
+  }, [isDragging]);
+
+  // Handle mouse down for drag-to-select in tracks area
+  const handleTracksMouseDown = useCallback((e) => {
+    // Only start selection if not clicking on an item and not already dragging
+    if (isDragging || e.target.classList.contains('timeline-item') || 
+        e.target.closest('.timeline-item')) {
+      return;
+    }
+
+    // Get the timeline container rect (not just tracks)
+    const timelineRect = timelineRef.current.getBoundingClientRect();
+    const tracksRect = e.currentTarget.getBoundingClientRect();
+    
+    // Calculate position relative to the timeline container
+    const startX = e.clientX - timelineRect.left;
+    const startY = e.clientY - timelineRect.top;
+
+    selectStartPos.current = { x: startX, y: startY };
+    setIsSelecting(true);
+    setSelectionBox({ x: startX, y: startY, width: 0, height: 0 });
+
+    // Prevent default to avoid text selection
+    e.preventDefault();
+  }, [isDragging]);
+
+  // Handle mouse move for drag-to-select (updated to work from anywhere)
+  const handleTimelineMouseMove = useCallback((e) => {
+    if (!isSelecting) return;
+
+    const rect = timelineRef.current.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+
+    const startX = selectStartPos.current.x;
+    const startY = selectStartPos.current.y;
+
+    const left = Math.min(startX, currentX);
+    const top = Math.min(startY, currentY);
+    const width = Math.abs(currentX - startX);
+    const height = Math.abs(currentY - startY);
+
+    setSelectionBox({ x: left, y: top, width, height });
+
+    // Find items within selection box
+    const selectedIds = new Set();
+    const timelineHeaderHeight = 32; // Updated to match actual ruler height
+    const trackHeight = 50;
+    const gapHeight = 20; // Gap between video and audio tracks
+
+    // Calculate time range
+    const leftTime = left / scale;
+    const rightTime = (left + width) / scale;
+
+    // Calculate track assignments inside this function to avoid initialization issues
+    const currentTrackAssignments = calculateTrackAssignments(mediaItems);
+
+    // Check video tracks FIRST (they're rendered at the top)
+    currentTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+      const trackTop = timelineHeaderHeight + (trackIndex * trackHeight);
+      const trackBottom = trackTop + trackHeight;
+
+      if (top <= trackBottom && (top + height) >= trackTop) {
+        track.forEach(item => {
+          const itemEnd = item.startTime + item.duration;
+          if (item.startTime <= rightTime && itemEnd >= leftTime) {
+            selectedIds.add(item.id);
+          }
+        });
+      }
+    });
+
+    // Check audio tracks AFTER video tracks + gap
+    currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+      const videoTracksHeight = Math.max(1, currentTrackAssignments.videoTracks.length) * trackHeight;
+      const actualGapHeight = currentTrackAssignments.audioTracks.length > 0 ? gapHeight : 0;
+      const trackTop = timelineHeaderHeight + videoTracksHeight + actualGapHeight + (trackIndex * trackHeight);
+      const trackBottom = trackTop + trackHeight;
+
+      if (top <= trackBottom && (top + height) >= trackTop) {
+        track.forEach(item => {
+          const itemEnd = item.startTime + item.duration;
+          if (item.startTime <= rightTime && itemEnd >= leftTime) {
+            selectedIds.add(item.id);
+          }
+        });
+      }
+    });
+
+    setSelectedItems(selectedIds);
+  }, [isSelecting, scale, calculateTrackAssignments, mediaItems]);
+
+  // Handle mouse up for drag-to-select
+  const handleTimelineMouseUp = useCallback(() => {
+    if (isSelecting) {
+      setIsSelecting(false);
+      setSelectionBox(null);
+    }
+  }, [isSelecting]);
 
   // Handle drop from source media
   const handleTimelineDrop = useCallback((e) => {
@@ -185,11 +549,52 @@ const Timeline = ({
       const dropY = e.clientY - rect.top;
       const dropTime = Math.max(0, dropX / scale);
       
-      // Calculate which track to drop into
-      const timelineHeaderHeight = 25;
-      const trackHeight = 60;
+      // Calculate which track to drop into based on item type and drop position
+      const timelineHeaderHeight = 32; // Match actual ruler height
+      const trackHeight = 50; // Match actual track height
+      const trackGap = 20; // Gap between video and audio sections
       const mouseYInTracks = dropY - timelineHeaderHeight;
-      const targetTrackIndex = Math.floor(mouseYInTracks / trackHeight);
+      
+      let targetTrackIndex = undefined;
+      
+      // Determine target track based on item type
+      if (sourceItem.type === 'audio') {
+        // For audio items, calculate position within audio section
+        const currentAssignments = calculateTrackAssignments(mediaItems);
+        const videoTrackCount = Math.max(1, currentAssignments.videoTracks.length);
+        const audioTrackCount = currentAssignments.audioTracks.length;
+        
+        const actualGapHeight = audioTrackCount > 0 ? trackGap : 0;
+        const audioSectionStartY = (videoTrackCount * trackHeight) + actualGapHeight;
+        const audioMouseY = mouseYInTracks - audioSectionStartY;
+        
+        if (audioMouseY >= 0) {
+          // Dropped in audio section
+          const audioTrackIndex = Math.floor(audioMouseY / trackHeight);
+          targetTrackIndex = videoTrackCount + audioTrackIndex; // Absolute UI position
+        }
+        // If dropped above audio section, don't set targetTrackIndex (will use auto-assignment)
+      } else {
+        // For video items, calculate position within video section
+        const videoTrackIndex = Math.floor(mouseYInTracks / trackHeight);
+        
+        // Check if dropped in video section (not in audio section)
+        const currentAssignments = calculateTrackAssignments(mediaItems);
+        const videoTrackCount = Math.max(1, currentAssignments.videoTracks.length);
+        const audioTrackCount = currentAssignments.audioTracks.length;
+        
+        if (audioTrackCount > 0) {
+          const videoSectionEndY = videoTrackCount * trackHeight;
+          const audioSectionStartY = videoSectionEndY + trackGap;
+          
+          if (mouseYInTracks < audioSectionStartY && videoTrackIndex >= 0) {
+            targetTrackIndex = videoTrackIndex; // Direct video track index
+          }
+        } else if (videoTrackIndex >= 0) {
+          targetTrackIndex = videoTrackIndex; // Direct video track index
+        }
+        // If dropped in audio section, don't set targetTrackIndex (will use auto-assignment)
+      }
       
       // Create timeline item from source item
       const timelineItem = {
@@ -225,139 +630,6 @@ const Timeline = ({
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, []);
-
-  // Calculate which track each item should be on (avoiding overlaps)
-  const calculateTrackAssignments = useCallback((items) => {
-    // Separate audio and video items
-    const audioItems = items.filter(item => item.type === 'audio');
-    const videoItems = items.filter(item => item.type !== 'audio');
-    
-    const audioTracks = [];
-    const videoTracks = [];
-    
-    // Process audio items
-    const sortedAudioItems = [...audioItems].sort((a, b) => a.startTime - b.startTime);
-    sortedAudioItems.forEach(item => {
-      const itemEnd = item.startTime + item.duration;
-      
-      // Handle forced track assignments for audio items
-      if (item.forceTrackIndex !== undefined) {
-        const targetTrack = item.forceTrackIndex;
-        
-        // Only assign to audio track range (0 to audioItems.length - 1)
-        // If trying to force to a video track area, let it fall through to normal assignment
-        const maxAudioTrackIndex = Math.max(audioItems.length - 1, 0);
-        if (targetTrack <= maxAudioTrackIndex) {
-          // Ensure we have enough audio tracks
-          while (audioTracks.length <= targetTrack) {
-            audioTracks.push([]);
-          }
-          
-          audioTracks[targetTrack].push({ ...item, trackIndex: targetTrack, trackType: 'audio', forceTrackIndex: undefined });
-          return;
-        }
-      }
-      
-      // Find the first audio track where this item fits without overlap
-      let assignedTrack = -1;
-      for (let trackIndex = 0; trackIndex < audioTracks.length; trackIndex++) {
-        const track = audioTracks[trackIndex];
-        const hasOverlap = track.some(trackItem => {
-          const trackItemEnd = trackItem.startTime + trackItem.duration;
-          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
-        });
-        
-        if (!hasOverlap) {
-          assignedTrack = trackIndex;
-          break;
-        }
-      }
-      
-      // If no existing track works, create a new one
-      if (assignedTrack === -1) {
-        assignedTrack = audioTracks.length;
-        audioTracks.push([]);
-      }
-      
-      audioTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'audio', forceTrackIndex: undefined });
-    });
-    
-    // Process video items
-    const sortedVideoItems = [...videoItems].sort((a, b) => a.startTime - b.startTime);
-    sortedVideoItems.forEach(item => {
-      const itemEnd = item.startTime + item.duration;
-      
-      // Handle forced track assignments for video items
-      if (item.forceTrackIndex !== undefined) {
-        const targetTrack = item.forceTrackIndex;
-        
-        // Convert absolute track index to video track index (subtract audio tracks)
-        const videoTrackIndex = targetTrack - audioTracks.length;
-        
-        // Only assign if targeting video track area (after audio tracks)
-        if (videoTrackIndex >= 0) {
-        // Ensure we have enough video tracks
-          while (videoTracks.length <= videoTrackIndex) {
-          videoTracks.push([]);
-        }
-        
-          videoTracks[videoTrackIndex].push({ ...item, trackIndex: videoTrackIndex, trackType: 'video', forceTrackIndex: undefined });
-        return;
-        }
-      }
-      
-      // Find the first video track where this item fits without TIME overlap (not track overlap)
-      let assignedTrack = -1;
-      for (let trackIndex = 0; trackIndex < videoTracks.length; trackIndex++) {
-        const track = videoTracks[trackIndex];
-        const hasTimeOverlap = track.some(trackItem => {
-          const trackItemEnd = trackItem.startTime + trackItem.duration;
-          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
-        });
-        
-        if (!hasTimeOverlap) {
-          assignedTrack = trackIndex;
-          break;
-        }
-      }
-      
-      // If no existing track works, create a new one
-      if (assignedTrack === -1) {
-        assignedTrack = videoTracks.length;
-        videoTracks.push([]);
-      }
-      
-      videoTracks[assignedTrack].push({ ...item, trackIndex: assignedTrack, trackType: 'video', forceTrackIndex: undefined });
-    });
-    
-    // Clean up empty tracks and reorganize
-    const cleanedAudioTracks = audioTracks.filter(track => track.length > 0);
-    const cleanedVideoTracks = videoTracks.filter(track => track.length > 0);
-    
-    // Update track indices after cleanup
-    cleanedAudioTracks.forEach((track, trackIndex) => {
-      track.forEach(item => {
-        item.trackIndex = trackIndex;
-        // Clear forceTrackIndex after assignment
-        delete item.forceTrackIndex;
-      });
-    });
-    
-    cleanedVideoTracks.forEach((track, trackIndex) => {
-      track.forEach(item => {
-        item.trackIndex = trackIndex;
-        // Clear forceTrackIndex after assignment
-        delete item.forceTrackIndex;
-      });
-    });
-    
-    console.log('Track assignments - Audio tracks:', cleanedAudioTracks.length, 'Video tracks:', cleanedVideoTracks.length);
-    
-    return { audioTracks: cleanedAudioTracks, videoTracks: cleanedVideoTracks };
-  }, []);
-
-  // Get track assignments for current media items
-  const trackAssignments = calculateTrackAssignments(mediaItems);
 
   // Handle mouse down on timeline items
   const handleItemMouseDown = useCallback((e, item) => {
@@ -411,10 +683,9 @@ const Timeline = ({
     const isMultiSelectDrag = selectedItems.has(dragItem.id) && selectedItems.size > 1;
     
     if (isMultiSelectDrag) {
-      // Multi-select drag: simple mouse-based movement
+      // Multi-select drag logic
       const selectedItemsList = mediaItems.filter(item => selectedItems.has(item.id));
       
-      // Store the mouse position from when drag started (we need to track this)
       if (!dragStartMouseX.current) {
         dragStartMouseX.current = mouseX;
         dragStartPositions.current = new Map();
@@ -423,7 +694,6 @@ const Timeline = ({
         });
       }
       
-      // Calculate how much mouse moved since drag started
       const mouseDelta = mouseX - dragStartMouseX.current;
       const timeDelta = mouseDelta / scale;
       
@@ -435,61 +705,49 @@ const Timeline = ({
         return;
       }
       
-      // Check collision - same track only
-      const nonSelectedItems = mediaItems.filter(item => !selectedItems.has(item.id));
-      const currentTrackAssignments = calculateTrackAssignments(mediaItems);
+      // For multi-select, check collision on each item's current track
+      const allTrackAssignments = calculateTrackAssignments(mediaItems);
       
       const wouldCollide = selectedItemsList.some(selectedItem => {
         const originalTime = dragStartPositions.current.get(selectedItem.id);
         const newItemTime = originalTime + timeDelta;
         const newItemEnd = newItemTime + selectedItem.duration;
         
-        // Find track
-        let selectedTrack = -1;
-        let selectedType = '';
+        // Find what track this selected item is currently on
+        let selectedTrackIndex = -1;
+        let selectedTrackType = '';
         
-        currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+        allTrackAssignments.videoTracks.forEach((track, trackIndex) => {
           if (track.some(item => item.id === selectedItem.id)) {
-            selectedTrack = trackIndex;
-            selectedType = 'audio';
+            selectedTrackIndex = trackIndex;
+            selectedTrackType = 'video';
           }
         });
         
-        if (selectedType === '') {
-          currentTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+        if (selectedTrackIndex === -1) {
+          allTrackAssignments.audioTracks.forEach((track, trackIndex) => {
             if (track.some(item => item.id === selectedItem.id)) {
-              selectedTrack = trackIndex;
-              selectedType = 'video';
+              selectedTrackIndex = trackIndex;
+              selectedTrackType = 'audio';
             }
           });
         }
         
-        return nonSelectedItems.some(nonSelectedItem => {
-          let nonSelectedTrack = -1;
-          let nonSelectedType = '';
-          
-          currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
-            if (track.some(item => item.id === nonSelectedItem.id)) {
-              nonSelectedTrack = trackIndex;
-              nonSelectedType = 'audio';
-            }
-          });
-          
-          if (nonSelectedType === '') {
-            currentTrackAssignments.videoTracks.forEach((track, trackIndex) => {
-              if (track.some(item => item.id === nonSelectedItem.id)) {
-                nonSelectedTrack = trackIndex;
-                nonSelectedType = 'video';
-              }
-            });
-          }
-          
-          if (selectedType !== nonSelectedType || selectedTrack !== nonSelectedTrack) {
-            return false;
-          }
-          
-          const nonSelectedEnd = nonSelectedItem.startTime + nonSelectedItem.duration;
-          return !(newItemTime >= nonSelectedEnd || newItemEnd <= nonSelectedItem.startTime);
+        // Get items on the same track, excluding selected items
+        let sameTrackItems = [];
+        if (selectedTrackType === 'video') {
+          sameTrackItems = allTrackAssignments.videoTracks[selectedTrackIndex] || [];
+        } else if (selectedTrackType === 'audio') {
+          sameTrackItems = allTrackAssignments.audioTracks[selectedTrackIndex] || [];
+        }
+        
+        // Filter out all selected items from collision check
+        sameTrackItems = sameTrackItems.filter(item => !selectedItems.has(item.id));
+        
+        // Check collision with non-selected items on same track
+        return sameTrackItems.some(item => {
+          const itemEnd = item.startTime + item.duration;
+          return (newItemTime < itemEnd && newItemEnd > item.startTime);
         });
       });
       
@@ -497,7 +755,7 @@ const Timeline = ({
         return;
       }
       
-      // Move all selected items to their new positions
+      // Move all selected items
       const updatedItems = mediaItems.map(item => {
         if (!selectedItems.has(item.id)) {
           return item;
@@ -515,127 +773,115 @@ const Timeline = ({
       return;
     }
     
-    // Single item drag - RESTORE ORIGINAL LOGIC
+    // Single item drag - RESTORE TRACK CHANGING ABILITY
     const newStartTime = Math.max(0, (mouseX - dragOffset) / scale);
-    
-    // Calculate which track the mouse is over
-    const timelineHeaderHeight = 25; // Height of the ruler
-    const trackHeight = 60;
-    const mouseYInTracks = mouseY - timelineHeaderHeight;
-    const targetTrackIndex = Math.floor(mouseYInTracks / trackHeight);
-    
-    // Improved snapping to 0.1 second intervals
     const snappedTime = Math.round(newStartTime * 10) / 10;
     
-    // Get other items excluding the one being dragged
-    const otherItems = mediaItems.filter(item => item.id !== dragItem.id);
+    // Calculate which track the mouse is over - COMPLETELY SEPARATE SYSTEMS
+    const timelineHeaderHeight = 32; // Match the actual ruler height
+    const trackHeight = 50; // Match the actual track height
+    const trackGap = 20; // Visual gap between video and audio sections
+    const mouseYInTracks = mouseY - timelineHeaderHeight;
     
-    // Separate track calculations for audio and video
-    const currentTrackAssignments = calculateTrackAssignments(otherItems);
-    const totalExistingTracks = currentTrackAssignments.audioTracks.length + currentTrackAssignments.videoTracks.length;
-    const isNewTrackArea = targetTrackIndex >= totalExistingTracks;
+    // Find what track the dragged item is currently on using FULL media items
+    const allTrackAssignments = calculateTrackAssignments(mediaItems);
+    let draggedItemTrackIndex = -1;
+    let draggedItemTrackType = '';
     
-    // Determine if we're dragging to an appropriate track type
-    const isDraggingAudio = dragItem.type === 'audio';
-    const audioTrackCount = currentTrackAssignments.audioTracks.length;
-    const isInAudioTrackArea = targetTrackIndex < audioTrackCount;
+    // Find the dragged item's current track
+    allTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+      if (track.some(item => item.id === dragItem.id)) {
+        draggedItemTrackIndex = trackIndex;
+        draggedItemTrackType = 'video';
+      }
+    });
     
-    // For video/visual media, allow dropping on any video track or new track area
-    // For audio, only allow dropping on audio tracks or new track area
-    const isValidTrackType = isDraggingAudio ? 
-      (isInAudioTrackArea || isNewTrackArea) : 
-      (!isInAudioTrackArea || isNewTrackArea);
-    
-    // Set drag target for visual feedback
-    if (targetTrackIndex >= 0) {
-      setDragTargetTrack({
-        index: targetTrackIndex,
-        isNewTrack: isNewTrackArea,
-        isValidTrackType,
-        canPlaceHere: isValidTrackType || (!isDraggingAudio && !isInAudioTrackArea)
-      });
-    } else {
-      setDragTargetTrack(null);
-    }
-    
-    let finalTime = snappedTime;
-    
-    // ALWAYS do collision detection to prevent invalid placements
-    // Determine the actual track where the item will be placed
-    let actualTargetTrackIndex = targetTrackIndex;
-    let willCreateNewTrack = false;
-    
-    // If dragging to an invalid track type, keep item on its current track
-    if (!isValidTrackType && !isNewTrackArea) {
-      // Find the current track of the dragged item
-      const dragItemTrackAssignments = calculateTrackAssignments(mediaItems);
-      let currentTrackIndex = -1;
-      
-      // Find which track the item is currently on
-      dragItemTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+    if (draggedItemTrackIndex === -1) {
+      allTrackAssignments.audioTracks.forEach((track, trackIndex) => {
         if (track.some(item => item.id === dragItem.id)) {
-          currentTrackIndex = trackIndex;
+          draggedItemTrackIndex = trackIndex;
+          draggedItemTrackType = 'audio';
         }
       });
-      
-      if (currentTrackIndex === -1) {
-        dragItemTrackAssignments.videoTracks.forEach((track, trackIndex) => {
-          if (track.some(item => item.id === dragItem.id)) {
-            currentTrackIndex = trackIndex + dragItemTrackAssignments.audioTracks.length;
-          }
-        });
-      }
-      
-      if (currentTrackIndex !== -1) {
-        actualTargetTrackIndex = currentTrackIndex;
-      }
-    } else if (isNewTrackArea && isValidTrackType) {
-      // This will create a new track, so no collision detection needed
-      willCreateNewTrack = true;
     }
     
-    // ALWAYS perform collision detection unless creating a completely new track
-    if (!willCreateNewTrack) {
-      // Get items that would be on the same track as our actual target
-      let sameTrackItems = [];
+    // If we can't find the track, allow the move on current track
+    if (draggedItemTrackIndex === -1) {
+      console.warn('Could not find track for dragged item:', dragItem.id);
+      const updatedItems = mediaItems.map(item =>
+        item.id === dragItem.id
+          ? { ...item, startTime: snappedTime }
+          : item
+      );
+      onItemsUpdate(updatedItems);
+      return;
+    }
+    
+    const isDraggingAudio = dragItem.type === 'audio';
+    const videoTrackCount = Math.max(1, allTrackAssignments.videoTracks.length); // Always at least 1 video track shown
+    const audioTrackCount = allTrackAssignments.audioTracks.length;
+    
+    // COMPLETELY SEPARATE TRACK SYSTEMS
+    if (isDraggingAudio) {
+      // AUDIO TRACK SYSTEM: Only consider the audio section of the timeline
+      const actualGapHeight = allTrackAssignments.audioTracks.length > 0 ? trackGap : 0; // Only add gap if audio tracks exist
+      const audioSectionStartY = (videoTrackCount * trackHeight) + actualGapHeight;
+      const audioMouseY = mouseYInTracks - audioSectionStartY;
+      let targetAudioTrackIndex = Math.floor(audioMouseY / trackHeight);
       
-      if (isDraggingAudio && actualTargetTrackIndex < audioTrackCount) {
-        // For audio items, check against items on the specific audio track
-        const targetAudioTrackIndex = actualTargetTrackIndex;
-        if (targetAudioTrackIndex < currentTrackAssignments.audioTracks.length) {
-          sameTrackItems = currentTrackAssignments.audioTracks[targetAudioTrackIndex];
-        }
-      } else if (!isDraggingAudio && actualTargetTrackIndex >= audioTrackCount) {
-        // For video items, check against items on the specific video track
-        const targetVideoTrackIndex = actualTargetTrackIndex - audioTrackCount;
-        if (targetVideoTrackIndex >= 0 && targetVideoTrackIndex < currentTrackAssignments.videoTracks.length) {
-          sameTrackItems = currentTrackAssignments.videoTracks[targetVideoTrackIndex];
-        }
+      // If mouse is above audio section, don't allow the move
+      if (audioMouseY < 0) {
+        return; // Can't drag audio into video section
       }
       
-      const dragItemEnd = snappedTime + dragItem.duration;
+      // Check if creating new audio track
+      const isNewAudioTrack = targetAudioTrackIndex >= audioTrackCount;
       
-      // Check for actual overlaps (not just touching)
-      const hasOverlap = sameTrackItems.some(item => {
+      if (isNewAudioTrack) {
+        // Create new audio track - use absolute UI position
+        const newAudioTrackIndex = audioTrackCount;
+        const absoluteTrackIndex = videoTrackCount + newAudioTrackIndex;
+        const updatedItems = mediaItems.map(item =>
+          item.id === dragItem.id
+            ? {
+                ...item,
+                startTime: snappedTime,
+                forceTrackIndex: absoluteTrackIndex // Absolute UI position
+              }
+            : item
+        );
+        onItemsUpdate(updatedItems);
+        return;
+      }
+      
+      // Clamp to existing audio tracks
+      if (targetAudioTrackIndex < 0) targetAudioTrackIndex = 0;
+      if (targetAudioTrackIndex >= audioTrackCount) targetAudioTrackIndex = audioTrackCount - 1;
+      
+      // Get items from target audio track
+      const targetAudioTrackItems = (allTrackAssignments.audioTracks[targetAudioTrackIndex] || [])
+        .filter(item => item.id !== dragItem.id);
+      
+      // Check collision in target audio track
+      const dragItemEnd = snappedTime + dragItem.duration;
+      const hasCollision = targetAudioTrackItems.some(item => {
         const itemEnd = item.startTime + item.duration;
-        // Allow touching (back-to-back) but prevent overlapping
         return (snappedTime < itemEnd && dragItemEnd > item.startTime);
       });
       
-      // If there's an actual overlap, try to find a valid adjacent position
-      if (hasOverlap) {
-        const sortedItems = sameTrackItems.sort((a, b) => a.startTime - b.startTime);
-        
-        // Find the best position to place the item without overlapping
+      let finalTime = snappedTime;
+      
+      // If collision, find best position in audio track
+      if (hasCollision) {
+        const sortedItems = targetAudioTrackItems.sort((a, b) => a.startTime - b.startTime);
         let bestPosition = snappedTime;
         let minDistance = Infinity;
         
-        // Option 1: Try placing after each existing item
+        // Try after each item
         sortedItems.forEach(item => {
           const afterPosition = item.startTime + item.duration;
           const afterEnd = afterPosition + dragItem.duration;
           
-          // Check if this position conflicts with any other item
           const wouldConflict = sortedItems.some(otherItem => {
             if (otherItem.id === item.id) return false;
             const otherEnd = otherItem.startTime + otherItem.duration;
@@ -651,13 +897,12 @@ const Timeline = ({
           }
         });
         
-        // Option 2: Try placing before each existing item
+        // Try before each item
         sortedItems.forEach(item => {
           const beforePosition = item.startTime - dragItem.duration;
           if (beforePosition >= 0) {
             const beforeEnd = beforePosition + dragItem.duration;
             
-            // Check if this position conflicts with any other item
             const wouldConflict = sortedItems.some(otherItem => {
               if (otherItem.id === item.id) return false;
               const otherEnd = otherItem.startTime + otherItem.duration;
@@ -674,32 +919,166 @@ const Timeline = ({
           }
         });
         
-        // Only update if we found a valid position that's reasonably close
-        if (minDistance < Infinity && minDistance <= dragItem.duration * 2) {
-          finalTime = bestPosition;
-        } else {
-          // If no good position found, don't move at all
-          return;
+        // Try at beginning
+        if (targetAudioTrackItems.length === 0 || targetAudioTrackItems[0].startTime >= dragItem.duration) {
+          const distance = Math.abs(0 - snappedTime);
+          if (distance < minDistance) {
+            bestPosition = 0;
+            minDistance = distance;
+          }
         }
+        
+        if (minDistance < Infinity && minDistance <= dragItem.duration * 3) {
+          finalTime = Math.max(0, bestPosition);
+        } else {
+          return; // Block move
+        }
+      }
+      
+      // Update audio item position - use absolute UI position
+      const absoluteTrackIndex = videoTrackCount + targetAudioTrackIndex;
+      const updatedItems = mediaItems.map(item =>
+        item.id === dragItem.id
+          ? {
+              ...item,
+              startTime: Math.round(finalTime * 10) / 10,
+              forceTrackIndex: absoluteTrackIndex // Absolute UI position
+            }
+          : item
+      );
+      onItemsUpdate(updatedItems);
+      return;
+    }
+    
+    // VIDEO TRACK SYSTEM: Only consider the video section of the timeline  
+    let targetVideoTrackIndex = Math.floor(mouseYInTracks / trackHeight);
+    
+    // For videos, block if mouse is in the audio section (after gap)
+    if (!isDraggingAudio && audioTrackCount > 0) {
+      const videoSectionEndY = videoTrackCount * trackHeight;
+      const audioSectionStartY = videoSectionEndY + trackGap;
+      
+      // Block if dragging into audio section
+      if (mouseYInTracks >= audioSectionStartY) {
+        return; // Can't drag video into audio section
       }
     }
     
-    // Only update position if it's a valid move
-    if (isValidTrackType || isNewTrackArea) {
-    // Update the item position
-    const updatedItems = mediaItems.map(item => 
-      item.id === dragItem.id 
-        ? { 
-            ...item, 
-            startTime: finalTime,
-              // Set forceTrackIndex only for valid track moves
-              forceTrackIndex: targetTrackIndex >= 0 ? targetTrackIndex : undefined
+    // Check if creating new video track
+    const isNewVideoTrack = targetVideoTrackIndex >= videoTrackCount;
+    
+    // If creating new video track, place it at the end of video tracks
+    if (isNewVideoTrack) {
+      const newVideoTrackIndex = videoTrackCount;
+      const updatedItems = mediaItems.map(item =>
+        item.id === dragItem.id
+          ? {
+              ...item,
+              startTime: snappedTime,
+              forceTrackIndex: newVideoTrackIndex // Direct video track index
+            }
+          : item
+      );
+      onItemsUpdate(updatedItems);
+      return;
+    }
+    
+    // Clamp target track to valid range for existing video tracks
+    if (targetVideoTrackIndex < 0) targetVideoTrackIndex = 0;
+    if (targetVideoTrackIndex >= videoTrackCount) targetVideoTrackIndex = videoTrackCount - 1;
+    
+    // Get items from the target video track for collision detection
+    const targetVideoTrackItems = (allTrackAssignments.videoTracks[targetVideoTrackIndex] || [])
+      .filter(item => item.id !== dragItem.id);
+    
+    // Check collision with items on target video track
+    const dragItemEnd = snappedTime + dragItem.duration;
+    const hasCollision = targetVideoTrackItems.some(item => {
+      const itemEnd = item.startTime + item.duration;
+      return (snappedTime < itemEnd && dragItemEnd > item.startTime);
+    });
+    
+    let finalTime = snappedTime;
+    
+    // If there's collision on target video track, find closest available position
+    if (hasCollision) {
+      const sortedItems = targetVideoTrackItems.sort((a, b) => a.startTime - b.startTime);
+      let bestPosition = snappedTime;
+      let minDistance = Infinity;
+      
+      // Option 1: Try placing after each existing item
+      sortedItems.forEach(item => {
+        const afterPosition = item.startTime + item.duration;
+        const afterEnd = afterPosition + dragItem.duration;
+        
+        // Check if this position conflicts with any other item
+        const wouldConflict = sortedItems.some(otherItem => {
+          if (otherItem.id === item.id) return false;
+          const otherEnd = otherItem.startTime + otherItem.duration;
+          return (afterPosition < otherEnd && afterEnd > otherItem.startTime);
+        });
+        
+        if (!wouldConflict) {
+          const distance = Math.abs(afterPosition - snappedTime);
+          if (distance < minDistance) {
+            bestPosition = afterPosition;
+            minDistance = distance;
+          }
+        }
+      });
+      
+      // Option 2: Try placing before each existing item
+      sortedItems.forEach(item => {
+        const beforePosition = item.startTime - dragItem.duration;
+        if (beforePosition >= 0) {
+          const beforeEnd = beforePosition + dragItem.duration;
+          
+          // Check if this position conflicts with any other item
+          const wouldConflict = sortedItems.some(otherItem => {
+            if (otherItem.id === item.id) return false;
+            const otherEnd = otherItem.startTime + otherItem.duration;
+            return (beforePosition < otherEnd && beforeEnd > otherItem.startTime);
+          });
+          
+          if (!wouldConflict) {
+            const distance = Math.abs(beforePosition - snappedTime);
+            if (distance < minDistance) {
+              bestPosition = beforePosition;
+              minDistance = distance;
+            }
+          }
+        }
+      });
+      
+      // Option 3: Try placing at the very beginning (time 0)
+      if (targetVideoTrackItems.length === 0 || targetVideoTrackItems[0].startTime >= dragItem.duration) {
+        const distance = Math.abs(0 - snappedTime);
+        if (distance < minDistance) {
+          bestPosition = 0;
+          minDistance = distance;
+        }
+      }
+      
+      // Only use the best position if it's reasonably close, otherwise block the move
+      if (minDistance < Infinity && minDistance <= dragItem.duration * 3) {
+        finalTime = Math.max(0, bestPosition);
+      } else {
+        // No good position found, block the move
+        return;
+      }
+    }
+    
+    // Allow the move to target video track with final time
+    const updatedItems = mediaItems.map(item =>
+      item.id === dragItem.id
+        ? {
+            ...item,
+            startTime: Math.round(finalTime * 10) / 10,
+            forceTrackIndex: targetVideoTrackIndex // Direct video track index
           }
         : item
     );
-    
     onItemsUpdate(updatedItems);
-    }
   }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems]);
 
   // Handle mouse up
@@ -717,12 +1096,12 @@ const Timeline = ({
   // Handle timeline tracks click for deselection
   const handleTracksClick = useCallback((e) => {
     // Only deselect if clicking on the tracks area itself, not on an item
-    // Also check if we're not currently dragging to avoid deselecting during drag operations
-    if (!isDragging && (e.target.classList.contains('timeline-tracks') || 
+    // Also check if we're not currently dragging or selecting to avoid interfering with those operations
+    if (!isDragging && !isSelecting && (e.target.classList.contains('timeline-tracks') || 
         e.target.classList.contains('timeline-track'))) {
       setSelectedItems(new Set());
     }
-  }, [isDragging]);
+  }, [isDragging, isSelecting]);
 
   // Handle mouse wheel for smooth timeline zooming
   const handleWheel = useCallback((e) => {
@@ -757,12 +1136,20 @@ const Timeline = ({
   const handleContextMenu = useCallback((e, item) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // If right-clicking on an item that's not selected, select only that item
+    // If right-clicking on an already selected item, keep the current selection
+    if (!selectedItems.has(item.id)) {
+      setSelectedItems(new Set([item.id]));
+    }
+    
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      item: item
+      item: item,
+      selectedCount: selectedItems.has(item.id) ? selectedItems.size : 1
     });
-  }, []);
+  }, [selectedItems]);
 
   // Close context menu
   const closeContextMenu = useCallback((e) => {
@@ -773,19 +1160,24 @@ const Timeline = ({
     setContextMenu(null);
   }, []);
 
-  // Toggle track lock
-  const toggleTrackLock = useCallback((itemId) => {
+  // Toggle track lock for all selected items
+  const toggleTrackLock = useCallback(() => {
+    const selectedItemsList = mediaItems.filter(item => selectedItems.has(item.id));
+    const allLocked = selectedItemsList.every(item => lockedTracks.has(item.id));
+    
     setLockedTracks(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(itemId)) {
-        newSet.delete(itemId);
+      selectedItemsList.forEach(item => {
+        if (allLocked) {
+          newSet.delete(item.id);
       } else {
-        newSet.add(itemId);
+          newSet.add(item.id);
       }
+      });
       return newSet;
     });
     closeContextMenu();
-  }, [closeContextMenu]);
+  }, [mediaItems, selectedItems, lockedTracks, closeContextMenu]);
 
   // Delete selected items
   const deleteSelectedItems = useCallback(() => {
@@ -939,6 +1331,42 @@ const Timeline = ({
     };
   }, [handleMouseMove, handleMouseUp, contextMenu, closeContextMenu]);
 
+  // Separate mouse event handlers for scrubbing to avoid conflicts
+  useEffect(() => {
+    if (!isScrubbing && !rulerMouseDown) return;
+
+    const handleScrubMouseMove = (e) => {
+      if (isScrubbing) {
+        const rect = timelineRef.current?.getBoundingClientRect();
+        if (rect) {
+          const mouseX = e.clientX - rect.left;
+          const newTime = Math.max(0, Math.min(duration, mouseX / scale));
+          onTimeUpdate(newTime);
+        }
+      } else if (rulerMouseDown && !isDragging) {
+        // Check if we should start scrubbing
+        const deltaX = Math.abs(e.clientX - rulerMouseDownPos.current.x);
+        const deltaY = Math.abs(e.clientY - rulerMouseDownPos.current.y);
+        if (deltaX > 3 || deltaY > 3) {
+          setIsScrubbing(true);
+        }
+      }
+    };
+
+    const handleScrubMouseUp = () => {
+      setIsScrubbing(false);
+      setRulerMouseDown(false);
+    };
+
+    document.addEventListener('mousemove', handleScrubMouseMove);
+    document.addEventListener('mouseup', handleScrubMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleScrubMouseMove);
+      document.removeEventListener('mouseup', handleScrubMouseUp);
+    };
+  }, [isScrubbing, rulerMouseDown, isDragging, scale, duration, onTimeUpdate]);
+
   // Get appropriate icon for media item
   const getMediaIcon = useCallback((item) => {
     if (item.type === 'video') {
@@ -979,7 +1407,7 @@ const Timeline = ({
       }}>
         <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
         
-        <button 
+          <button 
           onClick={onPlayPause}
           className={`timeline-play-button ${isPlaying ? 'playing' : ''}`}
           style={{
@@ -1000,14 +1428,14 @@ const Timeline = ({
           onMouseLeave={(e) => e.target.style.background = '#444'}
         >
           {isPlaying ? '❚❚' : '▶'}
-        </button>
+          </button>
         
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', color: '#999' }}>
             Selected: {selectedItems.size} | Copied: {copiedItems.length}
           </span>
           <span style={{ fontSize: '11px', color: '#ccc', fontFamily: 'monospace' }}>
-            {Math.floor(currentTime / 60)}:{(currentTime % 60).toFixed(1).padStart(4, '0')} / {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, '0')}
+            {Math.floor(currentTime / 60)}:{Math.round((currentTime % 60) * 10) / 10} / {Math.floor(duration / 60)}:{Math.round((duration % 60) * 10) / 10}
           </span>
         </div>
       </div>
@@ -1016,6 +1444,7 @@ const Timeline = ({
         ref={timelineRef}
         className="timeline-ruler" 
         onClick={handleTimelineClick}
+        onMouseDown={handleRulerMouseDown}
         onWheel={handleWheel}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
@@ -1023,7 +1452,7 @@ const Timeline = ({
           position: 'relative', 
           height: '32px', 
           background: '#252525', 
-          cursor: 'pointer',
+          cursor: isScrubbing ? 'grabbing' : 'pointer',
           borderBottom: '1px solid #333'
         }}
       >
@@ -1062,86 +1491,26 @@ const Timeline = ({
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
         onClick={handleTracksClick}
+        onMouseDown={handleTracksMouseDown}
+        onMouseMove={handleTimelineMouseMove}
+        onMouseUp={handleTimelineMouseUp}
       >
-        {/* Audio Tracks */}
-        {trackAssignments.audioTracks.map((track, trackIndex) => (
+        {/* Selection box overlay */}
+        {isSelecting && selectionBox && (
           <div
-            key={`audio-${trackIndex}`}
-            className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
             style={{
-              height: '50px',
-              borderBottom: '1px solid #2a2a2a',
-              position: 'relative',
-              background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
-                         'rgba(139, 92, 246, 0.1)' : 
-                         '#1e1e1e'
+          position: 'absolute',
+              left: `${selectionBox.x}px`,
+              top: `${selectionBox.y}px`,
+              width: `${selectionBox.width}px`,
+              height: `${selectionBox.height}px`,
+              background: 'rgba(139, 92, 246, 0.2)',
+              border: '1px solid #8b5cf6',
+          pointerEvents: 'none',
+              zIndex: 20
             }}
-          >
-            {/* Track label */}
-            <div style={{
-              position: 'absolute',
-              left: '8px',
-              top: '6px',
-              fontSize: '10px',
-              color: '#888',
-              pointerEvents: 'none',
-              zIndex: 1,
-              fontWeight: '500'
-            }}>
-              🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
-            </div>
-
-            {/* Track items */}
-            {track.map(item => {
-              const left = item.startTime * scale;
-              const width = item.duration * scale;
-              
-              return (
-                <div
-                  key={item.id}
-                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                  style={{
-                    position: 'absolute',
-                    left: `${left}px`,
-                    top: '18px',
-                    width: `${width}px`,
-                    height: '28px',
-                    background: selectedItems.has(item.id) ? 
-                               '#8b5cf6' : 
-                               '#06b6d4',
-                    border: selectedItems.has(item.id) ? 
-                           '2px solid #a855f7' : 
-                           '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 6px',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    fontSize: '10px',
-                    color: '#fff',
-                    userSelect: 'none',
-                    boxShadow: selectedItems.has(item.id) ? 
-                              '0 2px 4px rgba(139, 92, 246, 0.3)' : 
-                              '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  onMouseDown={(e) => handleItemMouseDown(e, item)}
-                  onContextMenu={(e) => handleContextMenu(e, item)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <span style={{ 
-                    whiteSpace: 'nowrap', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis',
-                    fontWeight: '500'
-                  }}>
-                    🎵 {item.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+          />
+        )}
         
         {/* Video Tracks - Always show at least one */}
         {Math.max(1, trackAssignments.videoTracks.length) && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
@@ -1154,8 +1523,7 @@ const Timeline = ({
                 height: '50px',
                 borderBottom: '1px solid #2a2a2a',
               position: 'relative',
-                background: dragTargetTrack?.index === (trackAssignments.audioTracks.length + trackIndex) && 
-                           dragTargetTrack?.canPlaceHere ? 
+                background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
                            'rgba(139, 92, 246, 0.1)' : 
                            '#1e1e1e'
             }}
@@ -1227,8 +1595,8 @@ const Timeline = ({
           );
         })}
 
-        {/* New Track Drop Zone - only show when dragging */}
-        {isDragging && (
+        {/* Video Track Drop Zone - show immediately after video tracks when dragging video items */}
+        {isDragging && dragItem && dragItem.type !== 'audio' && (
           <div
             style={{
               height: '50px',
@@ -1248,11 +1616,140 @@ const Timeline = ({
           >
             {dragTargetTrack?.isNewTrack ? (
               <span style={{ color: '#8b5cf6' }}>
-                ✨ Drop here to create new track
+                ✨ Drop here to create new video track
               </span>
             ) : (
               <span>
-                Drop here to create new track
+                Drop here to create new video track
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Visual Gap Between Video and Audio Tracks */}
+        {trackAssignments.audioTracks.length > 0 && (
+          <div style={{
+            height: '20px',
+            background: '#0a0a0a',
+            borderTop: '1px solid #333',
+            borderBottom: '1px solid #333',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '9px',
+            color: '#555',
+            fontWeight: '500'
+          }}>
+            AUDIO
+          </div>
+        )}
+
+        {/* Audio Tracks - Rendered at the bottom after gap */}
+        {trackAssignments.audioTracks.map((track, trackIndex) => (
+          <div
+            key={`audio-${trackIndex}`}
+            className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
+            style={{
+              height: '50px',
+              borderBottom: '1px solid #2a2a2a',
+              position: 'relative',
+              background: dragTargetTrack?.index === (trackAssignments.videoTracks.length + trackIndex) && dragTargetTrack?.canPlaceHere ? 
+                         'rgba(139, 92, 246, 0.1)' : 
+                         '#1e1e1e'
+            }}
+          >
+            {/* Track label */}
+            <div style={{
+              position: 'absolute',
+              left: '8px',
+              top: '6px',
+              fontSize: '10px',
+              color: '#888',
+              pointerEvents: 'none',
+              zIndex: 1,
+              fontWeight: '500'
+            }}>
+              🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
+            </div>
+
+            {/* Track items */}
+            {track.map(item => {
+              const left = item.startTime * scale;
+              const width = item.duration * scale;
+              
+              return (
+                <div
+                  key={item.id}
+                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}px`,
+                    top: '18px',
+                    width: `${width}px`,
+                    height: '28px',
+                    background: selectedItems.has(item.id) ? 
+                               '#8b5cf6' : 
+                               '#06b6d4',
+                    border: selectedItems.has(item.id) ? 
+                           '2px solid #a855f7' : 
+                           '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 6px',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                    fontSize: '10px',
+                    color: '#fff',
+                    userSelect: 'none',
+                    boxShadow: selectedItems.has(item.id) ? 
+                              '0 2px 4px rgba(139, 92, 246, 0.3)' : 
+                              '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  onMouseDown={(e) => handleItemMouseDown(e, item)}
+                  onContextMenu={(e) => handleContextMenu(e, item)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span style={{ 
+                    whiteSpace: 'nowrap', 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    fontWeight: '500'
+                  }}>
+                    🎵 {item.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* Audio Track Drop Zone - only show when dragging audio items and after audio section */}
+        {isDragging && dragItem && dragItem.type === 'audio' && trackAssignments.audioTracks.length > 0 && (
+          <div
+            style={{
+              height: '50px',
+              borderBottom: '2px dashed #444',
+              position: 'relative',
+              background: dragTargetTrack?.isNewTrack ? 
+                         'rgba(6, 182, 212, 0.1)' : 
+                         '#1e1e1e',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#666',
+              fontSize: '11px',
+              fontStyle: 'italic',
+              fontWeight: '500'
+            }}
+          >
+            {dragTargetTrack?.isNewTrack ? (
+              <span style={{ color: '#06b6d4' }}>
+                ✨ Drop here to create new audio track
+              </span>
+            ) : (
+              <span>
+                Drop here to create new audio track
               </span>
             )}
           </div>
@@ -1260,7 +1757,7 @@ const Timeline = ({
         
         {/* Calculate total height needed */}
         <div style={{ 
-          height: `${Math.max(1, (trackAssignments.audioTracks.length + Math.max(1, trackAssignments.videoTracks.length))) * 50 + 20}px` 
+          height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
         }} />
       </div>
 
@@ -1286,9 +1783,14 @@ const Timeline = ({
             style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
             onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
-            onClick={() => toggleTrackLock(contextMenu.item.id)}
+            onClick={toggleTrackLock}
           >
-            {lockedTracks.has(contextMenu.item.id) ? '🔓 Unlock Track' : '🔒 Lock Track'}
+            {(() => {
+              const selectedItemsList = mediaItems.filter(item => selectedItems.has(item.id));
+              const allLocked = selectedItemsList.every(item => lockedTracks.has(item.id));
+              const itemText = selectedItems.size > 1 ? `${selectedItems.size} Items` : 'Item';
+              return allLocked ? `🔓 Unlock ${itemText}` : `🔒 Lock ${itemText}`;
+            })()}
           </div>
           <div 
             style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
@@ -1296,7 +1798,7 @@ const Timeline = ({
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={copySelectedItems}
           >
-            📋 Copy (Ctrl+C)
+            📋 Copy {selectedItems.size > 1 ? `${selectedItems.size} Items` : ''} (Ctrl+C)
           </div>
           <div 
             style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
@@ -1304,7 +1806,7 @@ const Timeline = ({
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={duplicateSelectedItems}
           >
-            📋 Duplicate (Ctrl+D)
+            📋 Duplicate {selectedItems.size > 1 ? `${selectedItems.size} Items` : ''} (Ctrl+D)
           </div>
           <div 
             style={{ padding: '6px 12px', cursor: 'pointer', color: '#fff', fontSize: '12px' }}
@@ -1322,7 +1824,7 @@ const Timeline = ({
             onMouseLeave={(e) => e.target.style.background = 'transparent'}
             onClick={deleteSelectedItems}
           >
-            🗑️ Delete (Del)
+            🗑️ Delete {selectedItems.size > 1 ? `${selectedItems.size} Items` : ''} (Del)
           </div>
         </div>
       )}
@@ -1336,7 +1838,7 @@ const Timeline = ({
         background: '#1a1a1a',
         fontWeight: '400'
       }}>
-        💡 Shift+Click: Multi-select | Scroll: Zoom timeline | Right-click: Context menu | Drag: Move items
+        💡 Shift+Click: Multi-select | Drag: Select multiple | Scroll: Zoom timeline | Right-click: Context menu
       </div>
     </div>
   );
