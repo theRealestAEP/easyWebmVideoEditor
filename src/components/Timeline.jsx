@@ -1,5 +1,12 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 
+// Small tolerance for floating-point precision in collision detection
+// This allows items to be placed truly back-to-back with 0 gap
+const COLLISION_TOLERANCE = 0.05; // 50ms tolerance to account for 0.1s snapping grid
+
+// Snapping distance for intelligent item-to-item snapping
+const SNAP_DISTANCE = 0.2; // 200ms - snap to adjacent items when within this distance
+
 const Timeline = ({ 
   mediaItems, 
   currentTime, 
@@ -26,6 +33,8 @@ const Timeline = ({
   const audioElements = useRef(new Map()); // Store audio elements for playback
   const dragStartMouseX = useRef(null); // Store mouse X when multi-select drag starts
   const dragStartPositions = useRef(new Map()); // Store original positions when multi-select drag starts
+  const dragStartMouseY = useRef(null); // Store mouse Y when drag starts
+  const dragStartTrackIndex = useRef(null); // Store track index when drag starts
 
   // Drag-to-select state
   const [isSelecting, setIsSelecting] = useState(false);
@@ -36,6 +45,46 @@ const Timeline = ({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [rulerMouseDown, setRulerMouseDown] = useState(false);
   const rulerMouseDownPos = useRef({ x: 0, y: 0 });
+
+  // Smart snapping function that snaps to adjacent items
+  const getSmartSnappedTime = useCallback((rawTime, draggedItemId, trackItems) => {
+    // First, apply grid snapping
+    const gridSnappedTime = Math.round(rawTime * 10) / 10;
+    
+    // Find potential snap targets from other items on the same track
+    const otherItems = trackItems.filter(item => item.id !== draggedItemId);
+    let bestSnapTime = gridSnappedTime;
+    let minSnapDistance = Infinity;
+    
+    // Check snapping to start and end times of other items
+    otherItems.forEach(item => {
+      const itemStartTime = item.startTime;
+      const itemEndTime = item.startTime + item.duration;
+      
+      // Check snapping to item's end time (for back-to-back placement)
+      const distanceToEnd = Math.abs(rawTime - itemEndTime);
+      if (distanceToEnd <= SNAP_DISTANCE && distanceToEnd < minSnapDistance) {
+        bestSnapTime = itemEndTime;
+        minSnapDistance = distanceToEnd;
+      }
+      
+      // Check snapping to item's start time
+      const distanceToStart = Math.abs(rawTime - itemStartTime);
+      if (distanceToStart <= SNAP_DISTANCE && distanceToStart < minSnapDistance) {
+        bestSnapTime = itemStartTime;
+        minSnapDistance = distanceToStart;
+      }
+    });
+    
+    // Also check snapping to time 0
+    const distanceToZero = Math.abs(rawTime - 0);
+    if (distanceToZero <= SNAP_DISTANCE && distanceToZero < minSnapDistance) {
+      bestSnapTime = 0;
+      minSnapDistance = distanceToZero;
+    }
+    
+    return bestSnapTime;
+  }, []);
 
   // Calculate which track each item should be on (avoiding overlaps) - MOVED EARLY
   const calculateTrackAssignments = useCallback((items) => {
@@ -74,7 +123,7 @@ const Timeline = ({
         const track = videoTracks[trackIndex];
         const hasOverlap = track.some(trackItem => {
           const trackItemEnd = trackItem.startTime + trackItem.duration;
-          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
+          return !(item.startTime >= trackItemEnd - COLLISION_TOLERANCE || itemEnd <= trackItem.startTime + COLLISION_TOLERANCE);
         });
         
         if (!hasOverlap) {
@@ -124,7 +173,7 @@ const Timeline = ({
         const track = audioTracks[trackIndex];
         const hasOverlap = track.some(trackItem => {
           const trackItemEnd = trackItem.startTime + trackItem.duration;
-          return !(item.startTime >= trackItemEnd || itemEnd <= trackItem.startTime);
+          return !(item.startTime >= trackItemEnd - COLLISION_TOLERANCE || itemEnd <= trackItem.startTime + COLLISION_TOLERANCE);
         });
         
         if (!hasOverlap) {
@@ -155,8 +204,8 @@ const Timeline = ({
           const item1End = item1.startTime + item1.duration;
           const item2End = item2.startTime + item2.duration;
           
-          // Check if items overlap
-          if (!(item1.startTime >= item2End || item1End <= item2.startTime)) {
+          // Check if items overlap (with tolerance for back-to-back placement)
+          if (!(item1.startTime >= item2End - COLLISION_TOLERANCE || item1End <= item2.startTime + COLLISION_TOLERANCE)) {
             return { hasOverlap: true, item1, item2 };
           }
         }
@@ -191,7 +240,7 @@ const Timeline = ({
               
               const wouldOverlap = candidateTrack.some(existingItem => {
                 const existingEnd = existingItem.startTime + existingItem.duration;
-                return !(itemToMove.startTime >= existingEnd || itemEnd <= existingItem.startTime);
+                return !(itemToMove.startTime >= existingEnd - COLLISION_TOLERANCE || itemEnd <= existingItem.startTime + COLLISION_TOLERANCE);
               });
               
               if (!wouldOverlap) {
@@ -639,11 +688,38 @@ const Timeline = ({
     
     const rect = timelineRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
     const itemLeft = item.startTime * scale;
     
     setIsDragging(true);
     setDragItem(item);
     setDragOffset(mouseX - itemLeft);
+    
+    // Store initial drag position for track change detection
+    dragStartMouseY.current = mouseY;
+    
+    // Find and store the current track index of the dragged item
+    const allTrackAssignments = calculateTrackAssignments(mediaItems);
+    let currentTrackIndex = -1;
+    
+    // Check video tracks first
+    allTrackAssignments.videoTracks.forEach((track, trackIndex) => {
+      if (track.some(trackItem => trackItem.id === item.id)) {
+        currentTrackIndex = trackIndex;
+      }
+    });
+    
+    // If not found in video tracks, check audio tracks
+    if (currentTrackIndex === -1) {
+      const videoTrackCount = Math.max(1, allTrackAssignments.videoTracks.length);
+      allTrackAssignments.audioTracks.forEach((track, trackIndex) => {
+        if (track.some(trackItem => trackItem.id === item.id)) {
+          currentTrackIndex = videoTrackCount + trackIndex; // Absolute UI position
+        }
+      });
+    }
+    
+    dragStartTrackIndex.current = currentTrackIndex;
     
     // Handle multi-select with Shift (not Ctrl)
     if (e.shiftKey) {
@@ -669,7 +745,7 @@ const Timeline = ({
         }
       });
     }
-  }, [scale, lockedTracks]);
+  }, [scale, lockedTracks, mediaItems, calculateTrackAssignments]);
 
   // Handle mouse move for dragging with overlap prevention and track creation
   const handleMouseMove = useCallback((e) => {
@@ -747,7 +823,7 @@ const Timeline = ({
         // Check collision with non-selected items on same track
         return sameTrackItems.some(item => {
           const itemEnd = item.startTime + item.duration;
-          return (newItemTime < itemEnd && newItemEnd > item.startTime);
+          return (newItemTime < itemEnd - COLLISION_TOLERANCE && newItemEnd > item.startTime + COLLISION_TOLERANCE);
         });
       });
       
@@ -773,11 +849,16 @@ const Timeline = ({
       return;
     }
     
-    // Single item drag - RESTORE TRACK CHANGING ABILITY
+    // Single item drag - IMPROVED TRACK CHANGING WITH THRESHOLD
     const newStartTime = Math.max(0, (mouseX - dragOffset) / scale);
     const snappedTime = Math.round(newStartTime * 10) / 10;
     
-    // Calculate which track the mouse is over - COMPLETELY SEPARATE SYSTEMS
+    // Check if user has moved significantly in Y direction to allow track changes
+    const TRACK_CHANGE_THRESHOLD = 25; // pixels
+    const yDelta = Math.abs(mouseY - (dragStartMouseY.current || mouseY));
+    const shouldAllowTrackChange = yDelta >= TRACK_CHANGE_THRESHOLD;
+    
+    // Calculate which track the mouse is over
     const timelineHeaderHeight = 32; // Match the actual ruler height
     const trackHeight = 50; // Match the actual track height
     const trackGap = 20; // Visual gap between video and audio sections
@@ -817,6 +898,38 @@ const Timeline = ({
       return;
     }
     
+    // If user hasn't moved significantly in Y direction, keep item on current track
+    if (!shouldAllowTrackChange) {
+      // Just move horizontally on the same track
+      const currentTrackItems = draggedItemTrackType === 'video' 
+        ? (allTrackAssignments.videoTracks[draggedItemTrackIndex] || [])
+        : (allTrackAssignments.audioTracks[draggedItemTrackIndex] || []);
+      
+      // Use smart snapping to adjacent items on the same track
+      const smartSnappedTime = getSmartSnappedTime(newStartTime, dragItem.id, currentTrackItems);
+      
+      const otherItemsOnTrack = currentTrackItems.filter(item => item.id !== dragItem.id);
+      const dragItemEnd = smartSnappedTime + dragItem.duration;
+      
+      // Check collision on current track only
+      const hasCollision = otherItemsOnTrack.some(item => {
+        const itemEnd = item.startTime + item.duration;
+        return (smartSnappedTime < itemEnd - COLLISION_TOLERANCE && dragItemEnd > item.startTime + COLLISION_TOLERANCE);
+      });
+      
+      if (!hasCollision) {
+        // Allow horizontal movement on same track with smart snapping
+        const updatedItems = mediaItems.map(item =>
+          item.id === dragItem.id
+            ? { ...item, startTime: smartSnappedTime }
+            : item
+        );
+        onItemsUpdate(updatedItems);
+        return;
+      }
+      // If there's collision on current track, fall through to track changing logic
+    }
+    
     const isDraggingAudio = dragItem.type === 'audio';
     const videoTrackCount = Math.max(1, allTrackAssignments.videoTracks.length); // Always at least 1 video track shown
     const audioTrackCount = allTrackAssignments.audioTracks.length;
@@ -838,14 +951,17 @@ const Timeline = ({
       const isNewAudioTrack = targetAudioTrackIndex >= audioTrackCount;
       
       if (isNewAudioTrack) {
-        // Create new audio track - use absolute UI position
+        // Create new audio track - use absolute UI position with smart snapping
         const newAudioTrackIndex = audioTrackCount;
         const absoluteTrackIndex = videoTrackCount + newAudioTrackIndex;
+        const allAudioItems = allTrackAssignments.audioTracks.flat();
+        const smartSnappedTime = getSmartSnappedTime(snappedTime, dragItem.id, allAudioItems);
+        
         const updatedItems = mediaItems.map(item =>
           item.id === dragItem.id
             ? {
                 ...item,
-                startTime: snappedTime,
+                startTime: smartSnappedTime,
                 forceTrackIndex: absoluteTrackIndex // Absolute UI position
               }
             : item
@@ -866,7 +982,7 @@ const Timeline = ({
       const dragItemEnd = snappedTime + dragItem.duration;
       const hasCollision = targetAudioTrackItems.some(item => {
         const itemEnd = item.startTime + item.duration;
-        return (snappedTime < itemEnd && dragItemEnd > item.startTime);
+        return (snappedTime < itemEnd - COLLISION_TOLERANCE && dragItemEnd > item.startTime + COLLISION_TOLERANCE);
       });
       
       let finalTime = snappedTime;
@@ -885,7 +1001,7 @@ const Timeline = ({
           const wouldConflict = sortedItems.some(otherItem => {
             if (otherItem.id === item.id) return false;
             const otherEnd = otherItem.startTime + otherItem.duration;
-            return (afterPosition < otherEnd && afterEnd > otherItem.startTime);
+            return (afterPosition < otherEnd - COLLISION_TOLERANCE && afterEnd > otherItem.startTime + COLLISION_TOLERANCE);
           });
           
           if (!wouldConflict) {
@@ -906,7 +1022,7 @@ const Timeline = ({
             const wouldConflict = sortedItems.some(otherItem => {
               if (otherItem.id === item.id) return false;
               const otherEnd = otherItem.startTime + otherItem.duration;
-              return (beforePosition < otherEnd && beforeEnd > otherItem.startTime);
+              return (beforePosition < otherEnd - COLLISION_TOLERANCE && beforeEnd > otherItem.startTime + COLLISION_TOLERANCE);
             });
             
             if (!wouldConflict) {
@@ -935,13 +1051,15 @@ const Timeline = ({
         }
       }
       
-      // Update audio item position - use absolute UI position
+      // Update audio item position - use absolute UI position with smart snapping
       const absoluteTrackIndex = videoTrackCount + targetAudioTrackIndex;
+      const smartSnappedFinalTime = getSmartSnappedTime(finalTime, dragItem.id, targetAudioTrackItems);
+      
       const updatedItems = mediaItems.map(item =>
         item.id === dragItem.id
           ? {
               ...item,
-              startTime: Math.round(finalTime * 10) / 10,
+              startTime: smartSnappedFinalTime,
               forceTrackIndex: absoluteTrackIndex // Absolute UI position
             }
           : item
@@ -970,11 +1088,14 @@ const Timeline = ({
     // If creating new video track, place it at the end of video tracks
     if (isNewVideoTrack) {
       const newVideoTrackIndex = videoTrackCount;
+      const allVideoItems = allTrackAssignments.videoTracks.flat();
+      const smartSnappedTime = getSmartSnappedTime(snappedTime, dragItem.id, allVideoItems);
+      
       const updatedItems = mediaItems.map(item =>
         item.id === dragItem.id
           ? {
               ...item,
-              startTime: snappedTime,
+              startTime: smartSnappedTime,
               forceTrackIndex: newVideoTrackIndex // Direct video track index
             }
           : item
@@ -995,7 +1116,7 @@ const Timeline = ({
     const dragItemEnd = snappedTime + dragItem.duration;
     const hasCollision = targetVideoTrackItems.some(item => {
       const itemEnd = item.startTime + item.duration;
-      return (snappedTime < itemEnd && dragItemEnd > item.startTime);
+      return (snappedTime < itemEnd - COLLISION_TOLERANCE && dragItemEnd > item.startTime + COLLISION_TOLERANCE);
     });
     
     let finalTime = snappedTime;
@@ -1015,7 +1136,7 @@ const Timeline = ({
         const wouldConflict = sortedItems.some(otherItem => {
           if (otherItem.id === item.id) return false;
           const otherEnd = otherItem.startTime + otherItem.duration;
-          return (afterPosition < otherEnd && afterEnd > otherItem.startTime);
+          return (afterPosition < otherEnd - COLLISION_TOLERANCE && afterEnd > otherItem.startTime + COLLISION_TOLERANCE);
         });
         
         if (!wouldConflict) {
@@ -1037,7 +1158,7 @@ const Timeline = ({
           const wouldConflict = sortedItems.some(otherItem => {
             if (otherItem.id === item.id) return false;
             const otherEnd = otherItem.startTime + otherItem.duration;
-            return (beforePosition < otherEnd && beforeEnd > otherItem.startTime);
+            return (beforePosition < otherEnd - COLLISION_TOLERANCE && beforeEnd > otherItem.startTime + COLLISION_TOLERANCE);
           });
           
           if (!wouldConflict) {
@@ -1068,18 +1189,18 @@ const Timeline = ({
       }
     }
     
-    // Allow the move to target video track with final time
+    // Allow the move to target video track with final time and smart snapping
     const updatedItems = mediaItems.map(item =>
       item.id === dragItem.id
         ? {
             ...item,
-            startTime: Math.round(finalTime * 10) / 10,
+            startTime: getSmartSnappedTime(finalTime, dragItem.id, targetVideoTrackItems),
             forceTrackIndex: targetVideoTrackIndex // Direct video track index
           }
         : item
     );
     onItemsUpdate(updatedItems);
-  }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems]);
+  }, [isDragging, dragItem, dragOffset, scale, mediaItems, onItemsUpdate, calculateTrackAssignments, selectedItems, getSmartSnappedTime]);
 
   // Handle mouse up
   const handleMouseUp = useCallback(() => {
@@ -1090,6 +1211,9 @@ const Timeline = ({
     // Clear multi-select drag refs
     dragStartMouseX.current = null;
     dragStartPositions.current.clear();
+    // Clear single-item drag tracking refs
+    dragStartMouseY.current = null;
+    dragStartTrackIndex.current = null;
     // Don't automatically close context menu on mouse up
   }, []);
 
@@ -1218,7 +1342,7 @@ const Timeline = ({
         const hasOverlap = mediaItems.some(existingItem => {
           const newEnd = finalStartTime + newItem.duration;
           const existingEnd = existingItem.startTime + existingItem.duration;
-          return !(finalStartTime >= existingEnd || newEnd <= existingItem.startTime);
+          return !(finalStartTime >= existingEnd - COLLISION_TOLERANCE || newEnd <= existingItem.startTime + COLLISION_TOLERANCE);
         });
         
         if (!hasOverlap) break;
@@ -1227,12 +1351,12 @@ const Timeline = ({
         const conflictingItems = mediaItems.filter(existingItem => {
           const newEnd = finalStartTime + newItem.duration;
           const existingEnd = existingItem.startTime + existingItem.duration;
-          return !(finalStartTime >= existingEnd || newEnd <= existingItem.startTime);
+          return !(finalStartTime >= existingEnd - COLLISION_TOLERANCE || newEnd <= existingItem.startTime + COLLISION_TOLERANCE);
         });
         
         if (conflictingItems.length > 0) {
           const maxEndTime = Math.max(...conflictingItems.map(item => item.startTime + item.duration));
-          finalStartTime = maxEndTime + 0.1;
+          finalStartTime = maxEndTime; // Perfect back-to-back placement
         }
         
         attempts++;
@@ -1250,21 +1374,21 @@ const Timeline = ({
   const duplicateSelectedItems = useCallback(() => {
     const itemsToDuplicate = mediaItems.filter(item => selectedItems.has(item.id));
     const newItems = itemsToDuplicate.map((item, index) => {
-      // Try to place right after the original item
-      let newStartTime = item.startTime + item.duration + 0.1;
+      // Try to place right after the original item (perfect back-to-back)
+      let newStartTime = item.startTime + item.duration;
       
       // Check for overlaps and adjust if needed
       const hasOverlap = mediaItems.some(existingItem => {
         if (existingItem.id === item.id) return false; // Skip the original item
         const newEnd = newStartTime + item.duration;
         const existingEnd = existingItem.startTime + existingItem.duration;
-        return !(newStartTime >= existingEnd || newEnd <= existingItem.startTime);
+        return !(newStartTime >= existingEnd - COLLISION_TOLERANCE || newEnd <= existingItem.startTime + COLLISION_TOLERANCE);
       });
       
       if (hasOverlap) {
         // Find the latest end time and place after it
         const endTimes = mediaItems.map(mediaItem => mediaItem.startTime + mediaItem.duration);
-        newStartTime = Math.max(...endTimes) + 0.1;
+        newStartTime = Math.max(...endTimes);
       }
       
       return {
