@@ -831,17 +831,31 @@ const Timeline = ({
         return;
       }
       
-      // Move all selected items
+      // FIXED: Maintain relative positioning for multi-select drag
+      // Find the earliest item to use as anchor for grid snapping
+      const sortedSelectedItems = selectedItemsList.sort((a, b) => {
+        const aOriginal = dragStartPositions.current.get(a.id);
+        const bOriginal = dragStartPositions.current.get(b.id);
+        return aOriginal - bOriginal;
+      });
+      
+      const anchorItem = sortedSelectedItems[0];
+      const anchorOriginalTime = dragStartPositions.current.get(anchorItem.id);
+      const anchorNewTime = Math.max(0, anchorOriginalTime + timeDelta);
+      const anchorSnappedTime = Math.round(anchorNewTime * 10) / 10; // Grid snap the anchor
+      const actualTimeDelta = anchorSnappedTime - anchorOriginalTime; // Calculate actual delta after snapping
+      
+      // Move all selected items using the same actual delta to preserve relative positioning
       const updatedItems = mediaItems.map(item => {
         if (!selectedItems.has(item.id)) {
           return item;
         }
         
         const originalTime = dragStartPositions.current.get(item.id);
-        const newItemTime = Math.max(0, originalTime + timeDelta);
+        const newItemTime = Math.max(0, originalTime + actualTimeDelta);
         return {
           ...item,
-          startTime: Math.round(newItemTime * 10) / 10
+          startTime: newItemTime // No additional snapping - preserves back-to-back positioning
         };
       });
       

@@ -1155,7 +1155,7 @@ function App() {
       )}
 
       {exportProgress && (
-        <ExportProgress progress={exportProgress} />
+        <ExportProgress progress={exportProgress.progress} status={exportProgress.status} />
       )}
 
       {/* Project Save/Load Dialog */}

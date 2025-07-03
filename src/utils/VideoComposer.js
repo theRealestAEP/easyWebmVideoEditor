@@ -49,8 +49,6 @@ export class VideoComposer {
         throw new Error('Timeline seek callback is required for canvas capture export');
       }
       
-      safeOnProgress(5, 'Setting up canvas capture...');
-
       // Filter out audio items for video processing
       const audioItems = mediaItems.filter(item => item.type === 'audio');
 
@@ -67,8 +65,6 @@ export class VideoComposer {
       if (!existingCanvas) {
         throw new Error('No canvas found. Please ensure the video preview is visible during export.');
       }
-
-      safeOnProgress(10, 'Canvas found, setting up recording...');
 
       // Create a new canvas for recording at exact export dimensions
       const recordingCanvas = document.createElement('canvas');
@@ -93,8 +89,6 @@ export class VideoComposer {
         videoBitsPerSecond: 8000000 // 8 Mbps for high quality
       });
 
-      safeOnProgress(15, `Using ${mimeType} codec...`);
-
       const chunks = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -105,26 +99,19 @@ export class VideoComposer {
       return new Promise((resolve, reject) => {
         recorder.onstop = async () => {
           try {
-            safeOnProgress(87, 'Video recording complete. Processing final video...');
             let finalBlob = new Blob(chunks, { type: 'video/webm' });
             
             // If we have audio, we need to mix it with the video
             if (audioItems.length > 0) {
-              safeOnProgress(90, 'Adding audio track...');
               try {
                 finalBlob = await this.addAudioToVideo(finalBlob, audioItems[0], duration);
-                safeOnProgress(95, 'Audio mixing complete...');
               } catch (audioError) {
                 console.warn('Failed to add audio, proceeding with video only:', audioError);
-                safeOnProgress(95, 'Audio mixing failed, proceeding with video only...');
               }
-            } else {
-              safeOnProgress(95, 'No audio to process...');
             }
             
-            safeOnProgress(98, 'Creating download link...');
-            const url = URL.createObjectURL(finalBlob);
             safeOnProgress(100, 'Export complete! 🎉');
+            const url = URL.createObjectURL(finalBlob);
             console.log('✅ Canvas capture export completed successfully');
             resolve({ url, blob: finalBlob });
           } catch (error) {
@@ -139,7 +126,6 @@ export class VideoComposer {
 
         // Start recording
         recorder.start();
-        safeOnProgress(20, 'Recording canvas frames...');
 
         let frameIndex = 0;
         const totalFrames = Math.max(1, Math.ceil(duration * fps));
@@ -148,15 +134,18 @@ export class VideoComposer {
         const renderFrame = async () => {
           if (frameIndex >= totalFrames) {
             recorder.stop();
-            safeOnProgress(80, 'Finalizing video...');
             return;
           }
 
           const currentTime = frameIndex * timeStep;
           
-          // Update progress more frequently - every frame
-          const progress = 20 + (frameIndex / totalFrames) * 60;
-          safeOnProgress(progress, `Capturing frame ${frameIndex + 1}/${totalFrames}...`);
+          // Simple: just use the frame progress as the percentage
+          const frameProgress = (frameIndex / totalFrames) * 100;
+          
+          safeOnProgress(
+            frameProgress, 
+            `Capturing frame ${frameIndex + 1}/${totalFrames}`
+          );
           
           // Use the callback to seek the timeline to the exact time
           await onTimelineSeek(currentTime);
