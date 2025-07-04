@@ -922,7 +922,9 @@ function App() {
           border: '1px solid #444',
           display: 'flex',
           flexDirection: 'column',
-          height: '100%'
+          height: '100%',
+          contain: 'layout style paint', // CSS containment for isolation
+          isolation: 'isolate' // Create isolated stacking context
         }}>
           {/* Top Half - Existing Media Files */}
           <div style={{

@@ -1243,31 +1243,19 @@ const Timeline = ({
 
   // Handle mouse wheel for smooth timeline zooming
   const handleWheel = useCallback((e) => {
-      e.preventDefault();
+    // Only handle wheel events that are specifically on timeline elements
+    if (!e.target.closest('.timeline-container')) {
+      return;
+    }
     
-    const rect = timelineRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    
-    // Calculate the time position under the mouse before zoom
-    const timeUnderMouse = mouseX / scale;
+    e.preventDefault();
+    e.stopPropagation(); // Prevent affecting parent containers
     
     // Calculate new scale with smooth increments
     const zoomFactor = e.deltaY > 0 ? 0.85 : 1.18; // More granular zoom steps
     const newScale = Math.max(2, Math.min(200, scale * zoomFactor)); // Wider zoom range
     
-    // Calculate how much to adjust the scroll position to keep the mouse position stable
-    const newMouseX = timeUnderMouse * newScale;
-    const scrollDelta = newMouseX - mouseX;
-    
     setScale(newScale);
-    
-    // Adjust scroll position to keep zoom centered on mouse (if timeline is scrollable)
-    if (timelineRef.current.parentElement) {
-      const container = timelineRef.current.parentElement;
-      if (container.scrollLeft !== undefined) {
-        container.scrollLeft += scrollDelta;
-      }
-    }
   }, [scale]);
 
   // Handle right-click context menu
@@ -1530,10 +1518,20 @@ const Timeline = ({
   }, []);
 
   return (
-    <div className="timeline-container" style={{
-      border: '1px solid #333',
-      borderTop: 'none'
-    }}>
+    <div 
+      className="timeline-container" 
+      style={{
+        border: '1px solid #333',
+        borderTop: 'none',
+        contain: 'layout style paint size', // Added 'size' containment to prevent container resize
+        isolation: 'isolate', // Create isolated stacking context
+        height: '300px', // Fixed height to prevent container growth
+        minHeight: '300px',
+        maxHeight: '300px',
+        overflow: 'hidden' // Prevent internal content from expanding container
+      }}
+      onWheel={handleWheel}
+    >
       <div className="timeline-header" style={{
         background: '#2a2a2a',
         padding: '8px 16px',
@@ -1583,7 +1581,6 @@ const Timeline = ({
         className="timeline-ruler" 
         onClick={handleTimelineClick}
         onMouseDown={handleRulerMouseDown}
-        onWheel={handleWheel}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
         style={{ 
@@ -1591,7 +1588,9 @@ const Timeline = ({
           height: '32px', 
           background: '#252525', 
           cursor: isScrubbing ? 'grabbing' : 'pointer',
-          borderBottom: '1px solid #333'
+          borderBottom: '1px solid #333',
+          overflowX: 'auto',
+          overflowY: 'hidden'
         }}
       >
         {generateTimeMarkers()}
@@ -1624,7 +1623,9 @@ const Timeline = ({
       <div className="timeline-tracks" style={{ 
         minHeight: '200px', 
         background: '#1e1e1e', 
-        position: 'relative'
+        position: 'relative',
+        overflowX: 'auto',
+        overflowY: 'hidden'
       }}
         onDrop={handleTimelineDrop}
         onDragOver={handleTimelineDragOver}
@@ -1633,6 +1634,12 @@ const Timeline = ({
         onMouseMove={handleTimelineMouseMove}
         onMouseUp={handleTimelineMouseUp}
       >
+        {/* Timeline content container with proper width */}
+        <div style={{
+          position: 'relative',
+          minWidth: `${Math.max(800, duration * scale + 100)}px`,
+          width: '100%'
+        }}>
         {/* Selection box overlay */}
         {isSelecting && selectionBox && (
           <div
@@ -1776,7 +1783,9 @@ const Timeline = ({
             justifyContent: 'center',
             fontSize: '9px',
             color: '#555',
-            fontWeight: '500'
+            fontWeight: '500',
+            width: '100%',
+            minWidth: `${duration * scale}px`
           }}>
             AUDIO
           </div>
@@ -1897,6 +1906,7 @@ const Timeline = ({
         <div style={{ 
           height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
         }} />
+        </div>
       </div>
 
       {/* Context Menu */}

@@ -862,7 +862,16 @@ const VideoCanvas = ({
   }, []);
 
   return (
-    <div ref={containerRef} className="canvas-area">
+    <div 
+      ref={containerRef} 
+      className="canvas-area"
+      style={{
+        isolation: 'isolate', // Create new stacking context to prevent interference
+        contain: 'layout style paint', // CSS containment for isolation
+        position: 'relative',
+        overflow: 'hidden' // Prevent canvas from affecting layout
+      }}
+    >
       <style>
         {`
           @keyframes spin {
