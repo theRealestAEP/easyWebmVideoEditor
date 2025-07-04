@@ -1575,7 +1575,6 @@ const Timeline = ({
         
           <button 
           onClick={onPlayPause}
-          className={`timeline-play-button ${isPlaying ? 'playing' : ''}`}
           style={{
             background: '#444',
             color: 'white',
@@ -1583,21 +1582,23 @@ const Timeline = ({
             width: '28px',
             height: '28px',
             minWidth: '28px', // Prevent button from shrinking
-            borderRadius: '50%',
+            borderRadius: '50%', // Force circular shape
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '11px',
             cursor: 'pointer',
-            transition: 'background 0.2s ease',
+            transition: 'none', // Remove transition to prevent any visual changes
             flexShrink: 0, // Prevent button from shrinking in flex container
             position: 'absolute', // Change to absolute positioning
             left: '50%', // Center horizontally
             top: '50%', // Center vertically
-            transform: 'translate(-50%, -50%)' // Perfect centering
+            transform: 'translate(-50%, -50%)', // Perfect centering
+            boxSizing: 'border-box', // Ensure proper box model
+            outline: 'none', // Remove focus outline
+            padding: 0, // Remove any default padding
+            margin: 0 // Remove any default margin
           }}
-          onMouseEnter={(e) => e.target.style.background = '#555'}
-          onMouseLeave={(e) => e.target.style.background = '#444'}
         >
           <span style={{
             display: 'flex',
