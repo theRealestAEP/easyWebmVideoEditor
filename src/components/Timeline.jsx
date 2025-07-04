@@ -1408,24 +1408,53 @@ const Timeline = ({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Check if user is typing in an input field
+      const isTyping = document.activeElement && (
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.isContentEditable
+      );
+
+      // Check if the focus is within the timeline container or timeline has selected items and user recently interacted with timeline
+      const timelineContainer = timelineRef.current;
+      const isFocusInTimeline = timelineContainer && (
+        timelineContainer.contains(document.activeElement) ||
+        timelineContainer.contains(e.target) ||
+        e.target.closest('.timeline-container')
+      );
+
+      // For delete operations, only proceed if we're not typing AND either:
+      // 1. Focus is within timeline, OR 
+      // 2. Timeline has selected items AND no other interactive element has focus
+      const shouldHandleDelete = !isTyping && (
+        isFocusInTimeline || 
+        (selectedItems.size > 0 && !document.activeElement?.closest('.source-media-panel'))
+      );
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedItems.size > 0) {
+        if (shouldHandleDelete && selectedItems.size > 0) {
           deleteSelectedItems();
         }
       } else if (e.key === 'c' && (e.ctrlKey || e.metaKey)) {
-        if (selectedItems.size > 0) {
+        if (!isTyping && selectedItems.size > 0) {
           copySelectedItems();
         }
       } else if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
-        pasteItems();
+        if (!isTyping) {
+          pasteItems();
+        }
       } else if (e.key === 'd' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (selectedItems.size > 0) {
-          duplicateSelectedItems();
+        if (!isTyping) {
+          e.preventDefault();
+          if (selectedItems.size > 0) {
+            duplicateSelectedItems();
+          }
         }
       } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        setSelectedItems(new Set(mediaItems.map(item => item.id)));
+        if (!isTyping) {
+          e.preventDefault();
+          setSelectedItems(new Set(mediaItems.map(item => item.id)));
+        }
       }
     };
 
@@ -1539,7 +1568,8 @@ const Timeline = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        height: '40px'
+        height: '40px',
+        position: 'relative' // Add relative positioning for absolute button
       }}>
         <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
         
@@ -1552,19 +1582,35 @@ const Timeline = ({
             border: 'none',
             width: '28px',
             height: '28px',
+            minWidth: '28px', // Prevent button from shrinking
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '11px',
             cursor: 'pointer',
-            transition: 'background 0.2s ease'
+            transition: 'background 0.2s ease',
+            flexShrink: 0, // Prevent button from shrinking in flex container
+            position: 'absolute', // Change to absolute positioning
+            left: '50%', // Center horizontally
+            top: '50%', // Center vertically
+            transform: 'translate(-50%, -50%)' // Perfect centering
           }}
           onMouseEnter={(e) => e.target.style.background = '#555'}
           onMouseLeave={(e) => e.target.style.background = '#444'}
         >
-          {isPlaying ? '❚❚' : '▶'}
-          </button>
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%',
+            fontFamily: 'monospace', // Use monospace for consistent character width
+            fontWeight: 'bold'
+          }}>
+            {isPlaying ? '||' : '▶'}
+          </span>
+        </button>
         
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', color: '#999' }}>

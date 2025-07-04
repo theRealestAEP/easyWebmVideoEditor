@@ -93,7 +93,7 @@ const Toolbar = ({
       </div>
       
       <div className="toolbar-center">
-        <h1>Video Composer</h1>
+        <h1>EZ Web Video Editor</h1>
       </div>
       
       <div className="toolbar-right">
