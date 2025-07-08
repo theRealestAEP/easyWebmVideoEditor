@@ -54,7 +54,7 @@ export class VideoComposer {
       const videoItems = mediaItems.filter(item => item.type === 'video');
       const visualItems = mediaItems.filter(item => item.type !== 'audio');
       
-      // Include audio tracks from video files (like MP4s) in addition to dedicated audio items
+      // Start with basic audio items, then add virtual audio from video files below
       const allAudioSources = [...audioItems];
       
       // FIXED: Only extract audio from video files if there's NO separate audio track already
@@ -94,19 +94,30 @@ export class VideoComposer {
         }
       });
 
-      // Calculate actual export duration (like Premiere Pro)
-      // Should be the maximum of video content end OR audio content end
-      let actualDuration = duration; // Start with timeline duration
+      // FIXED: Calculate exact export duration based on the last media item end time
+      // This prevents blank frames and creates perfect loops
+      // Include ALL media items: original mediaItems + virtual video audio items
+      const allMediaForDuration = [...mediaItems, ...allAudioSources.filter(item => item.isVideoAudio)];
+      let actualDuration = 0; // Start from zero instead of timeline duration
       
-      // Check if any audio extends beyond current duration (including video audio)
-      if (allAudioSources.length > 0) {
-        const maxAudioEnd = Math.max(...allAudioSources.map(item => item.startTime + item.duration));
-        actualDuration = Math.max(actualDuration, maxAudioEnd);
-        console.log('📏 Duration calculation:', {
-          originalDuration: duration,
-          maxAudioEnd: maxAudioEnd,
-          actualDuration: actualDuration
+      // Find the latest end time from ALL media items (visual + audio + virtual video audio)
+      if (allMediaForDuration.length > 0) {
+        const allMediaEndTimes = allMediaForDuration.map(item => item.startTime + item.duration);
+        actualDuration = Math.max(...allMediaEndTimes);
+        
+        console.log('📏 Perfect Loop Duration Calculation:', {
+          originalTimelineDuration: duration,
+          totalMediaItems: allMediaForDuration.length,
+          originalMediaItems: mediaItems.length,
+          virtualVideoAudioItems: allAudioSources.filter(item => item.isVideoAudio).length,
+          mediaEndTimes: allMediaEndTimes,
+          actualDuration: actualDuration,
+          savedTime: (duration - actualDuration).toFixed(2) + 's (no blank frames!)'
         });
+      } else {
+        // Fallback to original duration if no media items
+        actualDuration = duration;
+        console.log('📏 No media items found, using timeline duration:', actualDuration);
       }
 
       console.log('🎬 Starting 3-Step Export Process:', {
