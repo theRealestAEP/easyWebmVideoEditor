@@ -164,6 +164,20 @@ body {
   font-weight: 500;
   transition: all 0.2s ease;
   color: white;
+  background: #555;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: #666;
+  transform: none;
+}
+
+.toolbar button:disabled {
+  background: #333;
+  color: #666;
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.5;
 }
 
 .add-media-button {
@@ -200,12 +214,6 @@ body {
 
 .clear-button:hover {
   background: #666;
-  transform: none;
-}
-
-.toolbar button:disabled {
-  background: #666;
-  cursor: not-allowed;
   transform: none;
 }
 
@@ -376,16 +384,18 @@ body {
 
 .settings-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 5px);
   right: 0;
   background: #2a2a2a;
   border: 1px solid #555;
   border-radius: 8px;
   padding: 16px;
   min-width: 280px;
+  width: max-content;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   z-index: 1000;
-  margin-top: 5px;
+  transform: translateY(0);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .settings-section {
@@ -427,7 +437,7 @@ body {
 
 .preset-button {
   padding: 6px 12px !important;
-  background: #444 !important;
+  background: #555 !important;
   color: #ccc !important;
   border: 1px solid #666 !important;
   border-radius: 4px !important;
@@ -442,18 +452,18 @@ body {
 }
 
 .preset-button.active {
-  background: #8b5cf6 !important;
+  background: #666 !important;
   color: white !important;
-  border-color: #8b5cf6 !important;
+  border-color: #777 !important;
 }
 
 .preset-button:hover {
-  background: #555 !important;
+  background: #666 !important;
   opacity: 1 !important;
 }
 
 .preset-button.active:hover {
-  background: #7c3aed !important;
+  background: #777 !important;
 }
 
 .fps-input {
@@ -486,7 +496,7 @@ body {
 }
 
 .project-button {
-  background: #444 !important;
+  background: #555 !important;
   color: #ccc !important;
   font-size: 12px !important;
   padding: 6px 10px !important;
@@ -495,31 +505,33 @@ body {
   gap: 4px;
 }
 
-.project-button:hover {
-  background: #555 !important;
+.project-button:hover:not(:disabled) {
+  background: #666 !important;
   color: #fff !important;
 }
 
 .project-button.save {
-  background: #10b981 !important;
-  color: #fff !important;
+  background: #555 !important;
+  color: #ccc !important;
 }
 
 .project-button.save:hover {
-  background: #059669 !important;
-}
-
-.project-button.load {
-  background: #3b82f6 !important;
+  background: #666 !important;
   color: #fff !important;
 }
 
+.project-button.load {
+  background: #555 !important;
+  color: #ccc !important;
+}
+
 .project-button.load:hover {
-  background: #2563eb !important;
+  background: #666 !important;
+  color: #fff !important;
 }
 
 .action-button {
-  background: #444 !important;
+  background: #555 !important;
   color: #ccc !important;
   font-size: 16px !important;
   font-weight: bold !important;
@@ -529,7 +541,7 @@ body {
 }
 
 .action-button:hover:not(:disabled) {
-  background: #555 !important;
+  background: #666 !important;
   color: #fff !important;
 }
 

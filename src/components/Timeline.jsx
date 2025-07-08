@@ -475,12 +475,16 @@ const Timeline = forwardRef(({
 
     const rect = timelineRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
     const newTime = Math.max(0, Math.min(duration, clickX / scale));
     onTimeUpdate(newTime);
     
     // Track that mouse is down in ruler and store position
     setRulerMouseDown(true);
     rulerMouseDownPos.current = { x: e.clientX, y: e.clientY };
+    
+    // Also initialize selection in case user drags
+    selectStartPos.current = { x: clickX, y: clickY };
     
     // Deselect all items when starting to interact with ruler
     setSelectedItems(new Set());
@@ -511,6 +515,10 @@ const Timeline = forwardRef(({
 
   // Handle mouse down for drag-to-select in tracks area
   const handleTracksMouseDown = useCallback((e) => {
+    // Only handle left-click (button 0) for selection
+    // Right-click (button 2) should be handled by onContextMenu on timeline items
+    if (e.button !== 0) return;
+    
     // Only start selection if not clicking on an item and not already dragging
     if (isDragging || e.target.classList.contains('timeline-item') || 
         e.target.closest('.timeline-item')) {
@@ -553,9 +561,9 @@ const Timeline = forwardRef(({
 
     // Find items within selection box
     const selectedIds = new Set();
-    const timelineHeaderHeight = 32; // Updated to match actual ruler height
+    const timelineHeaderHeight = 72; // Header (40px) + Ruler (32px) = 72px total
     const trackHeight = 50;
-    const gapHeight = 20; // Gap between video and audio tracks
+    const trackGap = 20; // Gap between video and audio tracks
 
     // Calculate time range
     const leftTime = left / scale;
@@ -582,7 +590,7 @@ const Timeline = forwardRef(({
     // Check audio tracks AFTER video tracks + gap
     currentTrackAssignments.audioTracks.forEach((track, trackIndex) => {
       const videoTracksHeight = Math.max(1, currentTrackAssignments.videoTracks.length) * trackHeight;
-      const actualGapHeight = currentTrackAssignments.audioTracks.length > 0 ? gapHeight : 0;
+      const actualGapHeight = currentTrackAssignments.audioTracks.length > 0 ? trackGap : 0;
       const trackTop = timelineHeaderHeight + videoTracksHeight + actualGapHeight + (trackIndex * trackHeight);
       const trackBottom = trackTop + trackHeight;
 
@@ -628,7 +636,7 @@ const Timeline = forwardRef(({
       const dropTime = Math.max(0, dropX / scale);
       
       // Calculate which track to drop into based on item type and drop position
-      const timelineHeaderHeight = 32; // Match actual ruler height
+      const timelineHeaderHeight = 72; // Header (40px) + Ruler (32px) = 72px total
       const trackHeight = 50; // Match actual track height
       const trackGap = 20; // Gap between video and audio sections
       const mouseYInTracks = dropY - timelineHeaderHeight;
@@ -711,6 +719,10 @@ const Timeline = forwardRef(({
 
   // Handle mouse down on timeline items
   const handleItemMouseDown = useCallback((e, item) => {
+    // Only handle left-click (button 0) for dragging
+    // Right-click (button 2) should be handled by onContextMenu
+    if (e.button !== 0) return;
+    
     if (lockedTracks.has(item.id)) return; // Don't allow dragging locked items
     
     e.stopPropagation();
@@ -902,7 +914,7 @@ const Timeline = forwardRef(({
     const shouldAllowTrackChange = yDelta >= TRACK_CHANGE_THRESHOLD;
     
     // Calculate which track the mouse is over
-    const timelineHeaderHeight = 32; // Match the actual ruler height
+    const timelineHeaderHeight = 72; // Header (40px) + Ruler (32px) = 72px total
     const trackHeight = 50; // Match the actual track height
     const trackGap = 20; // Visual gap between video and audio sections
     const mouseYInTracks = mouseY - timelineHeaderHeight;
@@ -1298,9 +1310,14 @@ const Timeline = forwardRef(({
       setSelectedItems(new Set([item.id]));
     }
     
+    // Position menu above the cursor
+    const menuHeight = 180; // Approximate height of context menu
+    const x = e.clientX;
+    const y = e.clientY - menuHeight; // Position above cursor
+    
     setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
+      x: x,
+      y: y,
       item: item,
       selectedCount: selectedItems.has(item.id) ? selectedItems.size : 1
     });
@@ -1434,6 +1451,124 @@ const Timeline = forwardRef(({
     closeContextMenu();
   }, [mediaItems, selectedItems, onItemsUpdate, closeContextMenu]);
 
+  // Mouse event listeners
+  useEffect(() => {
+    const handleDocumentClick = (e) => {
+      // Only close context menu if clicking outside of it
+      if (contextMenu && !e.target.closest('.context-menu')) {
+        closeContextMenu(e);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    // Add click listener only if context menu is open
+    if (contextMenu) {
+      document.addEventListener('click', handleDocumentClick);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  }, [handleMouseMove, handleMouseUp, contextMenu, closeContextMenu]);
+
+  // Separate mouse event handlers for scrubbing to avoid conflicts
+  useEffect(() => {
+    if (!isScrubbing && !rulerMouseDown) return;
+
+    const handleScrubMouseMove = (e) => {
+      if (isScrubbing) {
+        const rect = timelineRef.current?.getBoundingClientRect();
+        if (rect) {
+          const mouseX = e.clientX - rect.left;
+          const newTime = Math.max(0, Math.min(duration, mouseX / scale));
+          onTimeUpdate(newTime);
+        }
+      } else if (rulerMouseDown && !isDragging) {
+        // Check if we should start scrubbing or selection
+        const deltaX = Math.abs(e.clientX - rulerMouseDownPos.current.x);
+        const deltaY = Math.abs(e.clientY - rulerMouseDownPos.current.y);
+        if (deltaX > 3 || deltaY > 3) {
+          // If dragging more vertically, start selection; if more horizontally, start scrubbing
+          if (deltaY > deltaX) {
+            // Start selection
+            setIsSelecting(true);
+            setRulerMouseDown(false);
+            
+            // Initialize selection box
+            const rect = timelineRef.current?.getBoundingClientRect();
+            if (rect) {
+              const currentX = e.clientX - rect.left;
+              const currentY = e.clientY - rect.top;
+              const startX = selectStartPos.current.x;
+              const startY = selectStartPos.current.y;
+              
+              const left = Math.min(startX, currentX);
+              const top = Math.min(startY, currentY);
+              const width = Math.abs(currentX - startX);
+              const height = Math.abs(currentY - startY);
+              
+              setSelectionBox({ x: left, y: top, width, height });
+            }
+          } else {
+            // Start scrubbing
+            setIsScrubbing(true);
+          }
+        }
+      }
+    };
+
+    const handleScrubMouseUp = () => {
+      setIsScrubbing(false);
+      setRulerMouseDown(false);
+    };
+
+    document.addEventListener('mousemove', handleScrubMouseMove);
+    document.addEventListener('mouseup', handleScrubMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleScrubMouseMove);
+      document.removeEventListener('mouseup', handleScrubMouseUp);
+    };
+  }, [isScrubbing, rulerMouseDown, isDragging, scale, duration, onTimeUpdate]);
+
+  // Get appropriate icon for media item
+  const getMediaIcon = useCallback((item) => {
+    if (item.type === 'video') {
+      return '🎬'; // Video camera for regular videos
+    } else if (item.type === 'image') {
+      return (item.subtype === 'gif' || item.subtype === 'sticker') ? '🎭' : '🖼️'; // Animated mask for GIFs and stickers, frame for static images
+    }
+    return '📄'; // Default fallback
+  }, []);
+
+  // Get item color based on type
+  const getItemColor = useCallback((item) => {
+    if (item.type === 'video') {
+      return '#8b5cf6'; // Purple for videos
+    } else if (item.type === 'image') {
+      return (item.subtype === 'gif' || item.subtype === 'sticker') ? 
+             '#8b5cf6' : // Purple for animated images
+             '#10b981'; // Green for static images
+    } else if (item.type === 'audio') {
+      return '#06b6d4'; // Cyan for audio to distinguish from video
+    }
+    return '#8b5cf6'; // Default purple
+  }, []);
+
+  // Debug context menu state changes
+  useEffect(() => {
+    console.log('Context menu state changed:', contextMenu);
+    if (contextMenu) {
+      console.log('Context menu should be visible at:', contextMenu.x, contextMenu.y);
+    } else {
+      console.log('Context menu should be hidden');
+    }
+  }, [contextMenu]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1491,259 +1626,308 @@ const Timeline = forwardRef(({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedItems, deleteSelectedItems, copySelectedItems, pasteItems, duplicateSelectedItems, mediaItems]);
 
-  // Mouse event listeners
-  useEffect(() => {
-    const handleDocumentClick = (e) => {
-      // Only close context menu if clicking outside of it
-      if (contextMenu && !e.target.closest('.context-menu')) {
-        closeContextMenu(e);
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    
-    // Add click listener only if context menu is open
-    if (contextMenu) {
-      document.addEventListener('click', handleDocumentClick);
-    }
-    
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('click', handleDocumentClick);
-    };
-  }, [handleMouseMove, handleMouseUp, contextMenu, closeContextMenu]);
-
-  // Separate mouse event handlers for scrubbing to avoid conflicts
-  useEffect(() => {
-    if (!isScrubbing && !rulerMouseDown) return;
-
-    const handleScrubMouseMove = (e) => {
-      if (isScrubbing) {
-        const rect = timelineRef.current?.getBoundingClientRect();
-        if (rect) {
-          const mouseX = e.clientX - rect.left;
-          const newTime = Math.max(0, Math.min(duration, mouseX / scale));
-          onTimeUpdate(newTime);
-        }
-      } else if (rulerMouseDown && !isDragging) {
-        // Check if we should start scrubbing
-        const deltaX = Math.abs(e.clientX - rulerMouseDownPos.current.x);
-        const deltaY = Math.abs(e.clientY - rulerMouseDownPos.current.y);
-        if (deltaX > 3 || deltaY > 3) {
-          setIsScrubbing(true);
-        }
-      }
-    };
-
-    const handleScrubMouseUp = () => {
-      setIsScrubbing(false);
-      setRulerMouseDown(false);
-    };
-
-    document.addEventListener('mousemove', handleScrubMouseMove);
-    document.addEventListener('mouseup', handleScrubMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleScrubMouseMove);
-      document.removeEventListener('mouseup', handleScrubMouseUp);
-    };
-  }, [isScrubbing, rulerMouseDown, isDragging, scale, duration, onTimeUpdate]);
-
-  // Get appropriate icon for media item
-  const getMediaIcon = useCallback((item) => {
-    if (item.type === 'video') {
-      return '🎬'; // Video camera for regular videos
-    } else if (item.type === 'image') {
-      return (item.subtype === 'gif' || item.subtype === 'sticker') ? '🎭' : '🖼️'; // Animated mask for GIFs and stickers, frame for static images
-    }
-    return '📄'; // Default fallback
-  }, []);
-
-  // Get item color based on type
-  const getItemColor = useCallback((item) => {
-    if (item.type === 'video') {
-      return '#8b5cf6'; // Purple for videos
-    } else if (item.type === 'image') {
-      return (item.subtype === 'gif' || item.subtype === 'sticker') ? 
-             '#8b5cf6' : // Purple for animated images
-             '#10b981'; // Green for static images
-    } else if (item.type === 'audio') {
-      return '#06b6d4'; // Cyan for audio to distinguish from video
-    }
-    return '#8b5cf6'; // Default purple
-  }, []);
-
   return (
-    <div 
-      className="timeline-container" 
-      style={{
-        border: '1px solid #333',
-        borderTop: 'none',
-        contain: 'layout style paint size',
-        isolation: 'isolate',
-        height: '300px',
-        minHeight: '300px',
-        maxHeight: '300px',
-        overflow: 'hidden'
-      }}
-      onWheel={handleWheel}
-    >
-      <div className="timeline-header" style={{
-        background: '#2a2a2a',
-        padding: '8px 16px',
-        borderBottom: '1px solid #333',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        height: '40px',
-        position: 'relative'
-      }}>
-        <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
-        
-        <button 
-          onClick={onPlayPause}
-          style={{
-            background: '#444',
-            color: 'white',
-            border: 'none',
-            width: '28px',
-            height: '28px',
-            minWidth: '28px',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '11px',
-            cursor: 'pointer',
-            transition: 'none',
-            flexShrink: 0,
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            boxSizing: 'border-box',
-            outline: 'none',
-            padding: 0,
-            margin: 0
-          }}
-        >
-          <span style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%',
-            fontFamily: 'monospace',
-            fontWeight: 'bold'
-          }}>
-            {isPlaying ? '||' : '▶'}
-          </span>
-        </button>
-        
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', color: '#999' }}>
-            Selected: {selectedItems.size} | Copied: {copiedItems.length}
-          </span>
-          <span style={{ fontSize: '11px', color: '#ccc', fontFamily: 'monospace' }}>
-            {Math.floor(currentTime / 60)}:{Math.round((currentTime % 60) * 10) / 10} / {Math.floor(duration / 60)}:{Math.round((duration % 60) * 10) / 10}
-          </span>
-        </div>
-      </div>
-      
+    <div>
       <div 
         ref={timelineRef}
-        className="timeline-ruler" 
-        onClick={handleTimelineClick}
-        onMouseDown={handleRulerMouseDown}
-        onDrop={handleTimelineDrop}
-        onDragOver={handleTimelineDragOver}
-        style={{ 
-          position: 'relative', 
-          height: '32px', 
-          background: '#252525', 
-          cursor: isScrubbing ? 'grabbing' : 'pointer',
+        className="timeline-container" 
+        style={{
+          border: '1px solid #333',
+          borderTop: 'none',
+          contain: 'layout style paint size',
+          isolation: 'isolate',
+          height: '300px',
+          minHeight: '300px',
+          maxHeight: '300px',
+          overflow: 'hidden'
+        }}
+        onWheel={handleWheel}
+      >
+        {/* Selection box overlay at container level */}
+        {isSelecting && selectionBox && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${selectionBox.x}px`,
+              top: `${selectionBox.y}px`,
+              width: `${selectionBox.width}px`,
+              height: `${selectionBox.height}px`,
+              background: 'rgba(139, 92, 246, 0.2)',
+              border: '1px solid #8b5cf6',
+              pointerEvents: 'none',
+              zIndex: 20
+            }}
+          />
+        )}
+
+        <div className="timeline-header" style={{
+          background: '#2a2a2a',
+          padding: '8px 16px',
           borderBottom: '1px solid #333',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          height: '40px',
+          position: 'relative'
+        }}>
+          <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
+          
+          <button 
+            onClick={onPlayPause}
+            style={{
+              background: '#444',
+              color: 'white',
+              border: 'none',
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '11px',
+              cursor: 'pointer',
+              transition: 'none',
+              flexShrink: 0,
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              boxSizing: 'border-box',
+              outline: 'none',
+              padding: 0,
+              margin: 0
+            }}
+          >
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              height: '100%',
+              fontFamily: 'monospace',
+              fontWeight: 'bold'
+            }}>
+              {isPlaying ? '||' : '▶'}
+            </span>
+          </button>
+          
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#999' }}>
+              Selected: {selectedItems.size} | Copied: {copiedItems.length}
+            </span>
+            <span style={{ fontSize: '11px', color: '#ccc', fontFamily: 'monospace' }}>
+              {Math.floor(currentTime / 60)}:{Math.round((currentTime % 60) * 10) / 10} / {Math.floor(duration / 60)}:{Math.round((duration % 60) * 10) / 10}
+            </span>
+          </div>
+        </div>
+        
+        <div 
+          className="timeline-ruler" 
+          onClick={handleTimelineClick}
+          onMouseDown={handleRulerMouseDown}
+          onDrop={handleTimelineDrop}
+          onDragOver={handleTimelineDragOver}
+          style={{ 
+            position: 'relative', 
+            height: '32px', 
+            background: '#252525', 
+            cursor: isScrubbing ? 'grabbing' : 'pointer',
+            borderBottom: '1px solid #333',
+            overflowX: 'auto',
+            overflowY: 'hidden'
+          }}
+        >
+          {generateTimeMarkers()}
+          <div 
+            className="timeline-playhead"
+            style={{ 
+              position: 'absolute',
+              left: `${currentTime * scale}px`,
+              top: '0',
+              width: '2px',
+              height: '100%',
+              background: '#ff4444',
+              pointerEvents: 'none',
+              zIndex: 15
+            }}
+          >
+            <div style={{
+              position: 'absolute',
+              top: '-1px',
+              left: '-3px',
+              width: '8px',
+              height: '6px',
+              background: '#ff4444',
+              borderRadius: '1px'
+            }} />
+          </div>
+        </div>
+        
+        <div className="timeline-tracks" style={{ 
+          minHeight: '200px', 
+          background: '#1e1e1e', 
+          position: 'relative',
           overflowX: 'auto',
           overflowY: 'hidden'
         }}
-      >
-        {generateTimeMarkers()}
-        <div 
-          className="timeline-playhead"
-          style={{ 
-            position: 'absolute',
-            left: `${currentTime * scale}px`,
-            top: '0',
-            width: '2px',
-            height: '100%',
-            background: '#ff4444',
-            pointerEvents: 'none',
-            zIndex: 15
-          }}
+          onDrop={handleTimelineDrop}
+          onDragOver={handleTimelineDragOver}
+          onClick={handleTracksClick}
+          onMouseDown={handleTracksMouseDown}
+          onMouseMove={handleTimelineMouseMove}
+          onMouseUp={handleTimelineMouseUp}
         >
+          {/* Timeline content container with proper width */}
           <div style={{
-            position: 'absolute',
-            top: '-1px',
-            left: '-3px',
-            width: '8px',
-            height: '6px',
-            background: '#ff4444',
-            borderRadius: '1px'
-          }} />
-        </div>
-      </div>
-      
-      <div className="timeline-tracks" style={{ 
-        minHeight: '200px', 
-        background: '#1e1e1e', 
-        position: 'relative',
-        overflowX: 'auto',
-        overflowY: 'hidden'
-      }}
-        onDrop={handleTimelineDrop}
-        onDragOver={handleTimelineDragOver}
-        onClick={handleTracksClick}
-        onMouseDown={handleTracksMouseDown}
-        onMouseMove={handleTimelineMouseMove}
-        onMouseUp={handleTimelineMouseUp}
-      >
-        {/* Timeline content container with proper width */}
-        <div style={{
-          position: 'relative',
-          minWidth: `${Math.max(800, duration * scale + 100)}px`,
-          width: '100%'
-        }}>
-          {/* Selection box overlay */}
-          {isSelecting && selectionBox && (
-            <div
-              style={{
-                position: 'absolute',
-                left: `${selectionBox.x}px`,
-                top: `${selectionBox.y}px`,
-                width: `${selectionBox.width}px`,
-                height: `${selectionBox.height}px`,
-                background: 'rgba(139, 92, 246, 0.2)',
-                border: '1px solid #8b5cf6',
-                pointerEvents: 'none',
-                zIndex: 20
-              }}
-            />
-          )}
-          
-          {/* Video Tracks - Always show at least one */}
-          {Math.max(1, trackAssignments.videoTracks.length) > 0 && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
-            const track = trackAssignments.videoTracks[trackIndex] || [];
-            return (
+            position: 'relative',
+            minWidth: `${Math.max(800, duration * scale + 100)}px`,
+            width: '100%'
+          }}>
+            {/* Video Tracks - Always show at least one */}
+            {Math.max(1, trackAssignments.videoTracks.length) > 0 && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
+              const track = trackAssignments.videoTracks[trackIndex] || [];
+              return (
+                <div
+                  key={`video-${trackIndex}`}
+                  className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
+                  style={{
+                    height: '50px',
+                    borderBottom: '1px solid #2a2a2a',
+                    position: 'relative',
+                    background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                               'rgba(139, 92, 246, 0.1)' : 
+                               '#1e1e1e'
+                  }}
+                >
+                  {/* Track label */}
+                  <div style={{
+                    position: 'absolute',
+                    left: '8px',
+                    top: '6px',
+                    fontSize: '10px',
+                    color: '#888',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                    fontWeight: '500'
+                  }}>
+                    🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
+                  </div>
+
+                  {/* Track items */}
+                  {track && track.map && track.map(item => {
+                    const left = item.startTime * scale;
+                    const width = item.duration * scale;
+                    
+                    return (
+                      <div
+                        key={item.id}
+                        className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${left}px`,
+                          top: '18px',
+                          width: `${width}px`,
+                          height: '28px',
+                          background: selectedItems.has(item.id) ? 
+                                     '#8b5cf6' : 
+                                     getItemColor(item),
+                          border: selectedItems.has(item.id) ? 
+                                 '2px solid #a855f7' : 
+                                 '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0 6px',
+                          cursor: 'pointer',
+                          overflow: 'hidden',
+                          fontSize: '10px',
+                          color: '#fff',
+                          userSelect: 'none',
+                          boxShadow: selectedItems.has(item.id) ? 
+                                    '0 2px 4px rgba(139, 92, 246, 0.3)' : 
+                                    '0 1px 2px rgba(0,0,0,0.2)'
+                        }}
+                        onMouseDown={(e) => handleItemMouseDown(e, item)}
+                        onContextMenu={(e) => handleContextMenu(e, item)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span style={{ 
+                          whiteSpace: 'nowrap', 
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis',
+                          fontWeight: '500'
+                        }}>
+                          {item.name}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* Video Track Drop Zone - show immediately after video tracks when dragging video items */}
+            {isDragging && dragItem && dragItem.type !== 'audio' && (
               <div
-                key={`video-${trackIndex}`}
-                className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
+                style={{
+                  height: '50px',
+                  borderBottom: '2px dashed #444',
+                  position: 'relative',
+                  background: dragTargetTrack?.isNewTrack ? 
+                             'rgba(139, 92, 246, 0.1)' : 
+                             '#1e1e1e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#666',
+                  fontSize: '11px',
+                  fontStyle: 'italic',
+                  fontWeight: '500'
+                }}
+              >
+                {dragTargetTrack?.isNewTrack ? (
+                  <span style={{ color: '#8b5cf6' }}>
+                    ✨ Drop here to create new video track
+                  </span>
+                ) : (
+                  <span>
+                    Drop here to create new video track
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Visual Gap Between Video and Audio Tracks */}
+            {trackAssignments.audioTracks.length > 0 && (
+              <div style={{
+                height: '20px',
+                background: '#0a0a0a',
+                borderTop: '1px solid #333',
+                borderBottom: '1px solid #333',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '9px',
+                color: '#555',
+                fontWeight: '500',
+                width: '100%',
+                minWidth: `${duration * scale}px`
+              }}>
+                AUDIO
+              </div>
+            )}
+
+            {/* Audio Tracks - Rendered at the bottom after gap */}
+            {trackAssignments.audioTracks && trackAssignments.audioTracks.map && trackAssignments.audioTracks.map((track, trackIndex) => (
+              <div
+                key={`audio-${trackIndex}`}
+                className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
                 style={{
                   height: '50px',
                   borderBottom: '1px solid #2a2a2a',
                   position: 'relative',
-                  background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                  background: dragTargetTrack?.index === (trackAssignments.videoTracks.length + trackIndex) && dragTargetTrack?.canPlaceHere ? 
                              'rgba(139, 92, 246, 0.1)' : 
                              '#1e1e1e'
                 }}
@@ -1759,7 +1943,7 @@ const Timeline = forwardRef(({
                   zIndex: 1,
                   fontWeight: '500'
                 }}>
-                  🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
+                  🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
                 </div>
 
                 {/* Track items */}
@@ -1779,7 +1963,7 @@ const Timeline = forwardRef(({
                         height: '28px',
                         background: selectedItems.has(item.id) ? 
                                    '#8b5cf6' : 
-                                   getItemColor(item),
+                                   '#06b6d4',
                         border: selectedItems.has(item.id) ? 
                                '2px solid #a855f7' : 
                                '1px solid rgba(255,255,255,0.1)',
@@ -1806,197 +1990,66 @@ const Timeline = forwardRef(({
                         textOverflow: 'ellipsis',
                         fontWeight: '500'
                       }}>
-                        {item.name}
+                        🎵 {item.name}
                       </span>
                     </div>
                   );
                 })}
               </div>
-            );
-          })}
+            ))}
 
-          {/* Video Track Drop Zone - show immediately after video tracks when dragging video items */}
-          {isDragging && dragItem && dragItem.type !== 'audio' && (
-            <div
-              style={{
-                height: '50px',
-                borderBottom: '2px dashed #444',
-                position: 'relative',
-                background: dragTargetTrack?.isNewTrack ? 
-                           'rgba(139, 92, 246, 0.1)' : 
-                           '#1e1e1e',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#666',
-                fontSize: '11px',
-                fontStyle: 'italic',
-                fontWeight: '500'
-              }}
-            >
-              {dragTargetTrack?.isNewTrack ? (
-                <span style={{ color: '#8b5cf6' }}>
-                  ✨ Drop here to create new video track
-                </span>
-              ) : (
-                <span>
-                  Drop here to create new video track
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Visual Gap Between Video and Audio Tracks */}
-          {trackAssignments.audioTracks.length > 0 && (
-            <div style={{
-              height: '20px',
-              background: '#0a0a0a',
-              borderTop: '1px solid #333',
-              borderBottom: '1px solid #333',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '9px',
-              color: '#555',
-              fontWeight: '500',
-              width: '100%',
-              minWidth: `${duration * scale}px`
-            }}>
-              AUDIO
-            </div>
-          )}
-
-          {/* Audio Tracks - Rendered at the bottom after gap */}
-          {trackAssignments.audioTracks && trackAssignments.audioTracks.map && trackAssignments.audioTracks.map((track, trackIndex) => (
-            <div
-              key={`audio-${trackIndex}`}
-              className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
-              style={{
-                height: '50px',
-                borderBottom: '1px solid #2a2a2a',
-                position: 'relative',
-                background: dragTargetTrack?.index === (trackAssignments.videoTracks.length + trackIndex) && dragTargetTrack?.canPlaceHere ? 
-                           'rgba(139, 92, 246, 0.1)' : 
-                           '#1e1e1e'
-              }}
-            >
-              {/* Track label */}
-              <div style={{
-                position: 'absolute',
-                left: '8px',
-                top: '6px',
-                fontSize: '10px',
-                color: '#888',
-                pointerEvents: 'none',
-                zIndex: 1,
-                fontWeight: '500'
-              }}>
-                🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
+            {/* Audio Track Drop Zone - only show when dragging audio items and after audio section */}
+            {isDragging && dragItem && dragItem.type === 'audio' && trackAssignments.audioTracks.length > 0 && (
+              <div
+                style={{
+                  height: '50px',
+                  borderBottom: '2px dashed #444',
+                  position: 'relative',
+                  background: dragTargetTrack?.isNewTrack ? 
+                             'rgba(6, 182, 212, 0.1)' : 
+                             '#1e1e1e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#666',
+                  fontSize: '11px',
+                  fontStyle: 'italic',
+                  fontWeight: '500'
+                }}
+              >
+                {dragTargetTrack?.isNewTrack ? (
+                  <span style={{ color: '#06b6d4' }}>
+                    ✨ Drop here to create new audio track
+                  </span>
+                ) : (
+                  <span>
+                    Drop here to create new audio track
+                  </span>
+                )}
               </div>
+            )}
+            
+            {/* Calculate total height needed */}
+            <div style={{ 
+              height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
+            }} />
+          </div>
+        </div>
 
-              {/* Track items */}
-              {track && track.map && track.map(item => {
-                const left = item.startTime * scale;
-                const width = item.duration * scale;
-                
-                return (
-                  <div
-                    key={item.id}
-                    className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                    style={{
-                      position: 'absolute',
-                      left: `${left}px`,
-                      top: '18px',
-                      width: `${width}px`,
-                      height: '28px',
-                      background: selectedItems.has(item.id) ? 
-                                 '#8b5cf6' : 
-                                 '#06b6d4',
-                      border: selectedItems.has(item.id) ? 
-                             '2px solid #a855f7' : 
-                             '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '0 6px',
-                      cursor: 'pointer',
-                      overflow: 'hidden',
-                      fontSize: '10px',
-                      color: '#fff',
-                      userSelect: 'none',
-                      boxShadow: selectedItems.has(item.id) ? 
-                                '0 2px 4px rgba(139, 92, 246, 0.3)' : 
-                                '0 1px 2px rgba(0,0,0,0.2)'
-                    }}
-                    onMouseDown={(e) => handleItemMouseDown(e, item)}
-                    onContextMenu={(e) => handleContextMenu(e, item)}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <span style={{ 
-                      whiteSpace: 'nowrap', 
-                      overflow: 'hidden', 
-                      textOverflow: 'ellipsis',
-                      fontWeight: '500'
-                    }}>
-                      🎵 {item.name}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-
-          {/* Audio Track Drop Zone - only show when dragging audio items and after audio section */}
-          {isDragging && dragItem && dragItem.type === 'audio' && trackAssignments.audioTracks.length > 0 && (
-            <div
-              style={{
-                height: '50px',
-                borderBottom: '2px dashed #444',
-                position: 'relative',
-                background: dragTargetTrack?.isNewTrack ? 
-                           'rgba(6, 182, 212, 0.1)' : 
-                           '#1e1e1e',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#666',
-                fontSize: '11px',
-                fontStyle: 'italic',
-                fontWeight: '500'
-              }}
-            >
-              {dragTargetTrack?.isNewTrack ? (
-                <span style={{ color: '#06b6d4' }}>
-                  ✨ Drop here to create new audio track
-                </span>
-              ) : (
-                <span>
-                  Drop here to create new audio track
-                </span>
-              )}
-            </div>
-          )}
-          
-          {/* Calculate total height needed */}
-          <div style={{ 
-            height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
-          }} />
+        {/* Help text */}
+        <div style={{ 
+          padding: '8px 16px', 
+          fontSize: '10px', 
+          color: '#666',
+          borderTop: '1px solid #2a2a2a',
+          background: '#1a1a1a',
+          fontWeight: '400'
+        }}>
+          💡 Shift+Click: Multi-select | Drag: Select multiple | Scroll: Zoom timeline | Right-click: Context menu
         </div>
       </div>
 
-      {/* Help text */}
-      <div style={{ 
-        padding: '8px 16px', 
-        fontSize: '10px', 
-        color: '#666',
-        borderTop: '1px solid #2a2a2a',
-        background: '#1a1a1a',
-        fontWeight: '400'
-      }}>
-        💡 Shift+Click: Multi-select | Drag: Select multiple | Scroll: Zoom timeline | Right-click: Context menu
-      </div>
-
-      {/* Context Menu */}
+      {/* Context Menu - rendered outside timeline container for proper positioning */}
       {contextMenu && (
         <div
           className="context-menu"
@@ -2009,7 +2062,7 @@ const Timeline = forwardRef(({
             borderRadius: '6px',
             padding: '6px 0',
             minWidth: '160px',
-            zIndex: 1000,
+            zIndex: 10000,
             boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
           }}
           onClick={(e) => e.stopPropagation()}
