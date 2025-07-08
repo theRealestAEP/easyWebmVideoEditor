@@ -13,7 +13,7 @@ export class MediaProcessor {
     if (this.isInitialized) return;
 
     try {
-      console.log('Initializing MediaProcessor with FFmpeg...');
+      // console.log('Initializing MediaProcessor with FFmpeg...');
       
       // Load FFmpeg with WASM
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
@@ -23,7 +23,7 @@ export class MediaProcessor {
       });
 
       this.isInitialized = true;
-      console.log('MediaProcessor initialized successfully');
+      // console.log('MediaProcessor initialized successfully');
     } catch (error) {
       console.error('Failed to initialize MediaProcessor:', error);
       this.isInitialized = false;
@@ -37,13 +37,13 @@ export class MediaProcessor {
     
     // Return cached frames if available
     if (this.frameCache.has(cacheKey)) {
-      console.log('Using cached frames for:', mediaItem.name);
+      // console.log('Using cached frames for:', mediaItem.name);
       return this.frameCache.get(cacheKey);
     }
 
     // Check if this item is already being processed
     if (this.processingLocks.has(mediaItem.id)) {
-      console.log('Media item already being processed, waiting...', mediaItem.name);
+      // console.log('Media item already being processed, waiting...', mediaItem.name);
       // Wait for the existing processing to complete
       return await this.processingLocks.get(mediaItem.id);
     }
@@ -70,26 +70,26 @@ export class MediaProcessor {
 
     // For MP4s, just use FFmpeg with simple settings - browser video seeking is too unreliable
     if (mediaItem.type === 'video' && this.getFileExtension(mediaItem) === 'mp4') {
-      console.log('Using FFmpeg for MP4 processing (reliable approach):', mediaItem.name);
+      // console.log('Using FFmpeg for MP4 processing (reliable approach):', mediaItem.name);
       // Continue with regular FFmpeg processing below
     }
     
     await this.initialize();
     
     try {
-      console.log('Extracting frames from:', mediaItem.name, 'Type:', mediaItem.type, 'Subtype:', mediaItem.subtype);
+      // console.log('Extracting frames from:', mediaItem.name, 'Type:', mediaItem.type, 'Subtype:', mediaItem.subtype);
       
       const fileExtension = this.getFileExtension(mediaItem);
       const inputFileName = `input.${fileExtension}`;
       const outputPattern = 'frame_%04d.png';
       
-      console.log('Processing file:', mediaItem.name, 'Extension:', fileExtension);
+      // console.log('Processing file:', mediaItem.name, 'Extension:', fileExtension);
       
       // Handle different media sources
       let fileData;
       if (mediaItem.file && mediaItem.file instanceof File) {
         // For uploaded files, use the File object directly
-        console.log('Using File object for:', mediaItem.name);
+        // console.log('Using File object for:', mediaItem.name);
         
         // Add file size validation for MP4s
         if (fileExtension === 'mp4' && mediaItem.file.size > 50 * 1024 * 1024) { // 50MB limit
@@ -99,7 +99,7 @@ export class MediaProcessor {
         fileData = await fetchFile(mediaItem.file);
       } else if (mediaItem.url) {
         // For URLs (like Tenor stickers), use the URL
-        console.log('Using URL for:', mediaItem.name, mediaItem.url);
+        // console.log('Using URL for:', mediaItem.name, mediaItem.url);
         fileData = await fetchFile(mediaItem.url);
       } else {
         throw new Error('No valid file source found');
@@ -110,7 +110,7 @@ export class MediaProcessor {
         throw new Error('File data is empty or corrupted');
       }
       
-      console.log('File data loaded:', fileData.byteLength, 'bytes');
+      // console.log('File data loaded:', fileData.byteLength, 'bytes');
       
       // Write file to FFmpeg's virtual filesystem
       await this.ffmpeg.writeFile(inputFileName, fileData);
@@ -160,7 +160,7 @@ export class MediaProcessor {
   // Native browser-based frame extraction for MP4s
   async extractFramesNative(mediaItem, onProgress) {
     try {
-      console.log('Starting native MP4 processing for:', mediaItem.name);
+      // console.log('Starting native MP4 processing for:', mediaItem.name);
       onProgress?.(10, `Loading ${mediaItem.name}...`);
       
       // Create video element
@@ -188,7 +188,7 @@ export class MediaProcessor {
             const targetFPS = 10; // Good balance of quality and performance
             const maxFrames = Math.min(Math.ceil(duration * targetFPS), 120); // Reasonable limit
             
-            console.log(`MP4 metadata loaded: ${duration}s, extracting ${maxFrames} frames`);
+            // console.log(`MP4 metadata loaded: ${duration}s, extracting ${maxFrames} frames`);
             onProgress?.(20, `Extracting ${maxFrames} frames from ${mediaItem.name}...`);
             
             const canvas = document.createElement('canvas');
@@ -301,7 +301,7 @@ export class MediaProcessor {
               throw new Error(`No frames could be extracted from ${mediaItem.name}`);
             }
             
-            console.log(`✅ MP4 processing complete: ${successfulFrames} successful, ${skippedFrames} skipped frames`);
+            // console.log(`✅ MP4 processing complete: ${successfulFrames} successful, ${skippedFrames} skipped frames`);
             
             const frameData = {
               type: 'animated',
@@ -347,7 +347,7 @@ export class MediaProcessor {
 
   async getMediaInfo(fileName) {
     try {
-      console.log('Getting media info for:', fileName);
+      // console.log('Getting media info for:', fileName);
       
       // Use ffprobe to get media information
       await this.ffmpeg.exec([
@@ -358,7 +358,7 @@ export class MediaProcessor {
     } catch (error) {
       // FFmpeg outputs info to stderr even on success, so we expect this to "fail"
       // This is normal behavior - the media info is in the stderr output
-      console.log('FFmpeg info command completed (expected "error")', fileName);
+      // console.log('FFmpeg info command completed (expected "error")', fileName);
     }
     
     // For now, return default values - in a full implementation you'd parse the output
@@ -370,7 +370,7 @@ export class MediaProcessor {
       height: 300
     };
     
-    console.log('Using default media info for:', fileName, mediaInfo);
+    // console.log('Using default media info for:', fileName, mediaInfo);
     return mediaInfo;
   }
 
@@ -378,11 +378,11 @@ export class MediaProcessor {
     const targetFPS = 15; // 15 FPS for smoother playback
     
     try {
-      console.log('Starting frame extraction for:', mediaItem.name, 'Input file:', inputFileName);
+      // console.log('Starting frame extraction for:', mediaItem.name, 'Input file:', inputFileName);
       
       // For MP4s, use simple, direct frame extraction
       if (inputFileName.endsWith('.mp4')) {
-        console.log('Using direct MP4 frame extraction...');
+        // console.log('Using direct MP4 frame extraction...');
         onProgress?.(25, `Extracting frames from ${mediaItem.name}...`);
         
         // Simple, direct MP4 frame extraction
@@ -396,7 +396,7 @@ export class MediaProcessor {
           outputPattern
         ];
         
-        console.log('Direct MP4 extraction command:', directArgs.join(' '));
+        // console.log('Direct MP4 extraction command:', directArgs.join(' '));
         
         // Reasonable timeout for direct processing
         const timeoutPromise = new Promise((_, reject) => {
@@ -404,7 +404,7 @@ export class MediaProcessor {
         });
         
         await Promise.race([this.ffmpeg.exec(directArgs), timeoutPromise]);
-        console.log('Direct MP4 frame extraction completed for:', mediaItem.name);
+        // console.log('Direct MP4 frame extraction completed for:', mediaItem.name);
         
       } else {
         // Standard processing for other formats
@@ -417,7 +417,7 @@ export class MediaProcessor {
           outputPattern
         ];
         
-        console.log('Standard frame extraction command:', ffmpegArgs.join(' '));
+        // console.log('Standard frame extraction command:', ffmpegArgs.join(' '));
         
         // Add timeout to prevent hanging
         const timeoutPromise = new Promise((_, reject) => {
@@ -425,7 +425,7 @@ export class MediaProcessor {
         });
         
         await Promise.race([this.ffmpeg.exec(ffmpegArgs), timeoutPromise]);
-        console.log('Standard frame extraction completed for:', mediaItem.name);
+        // console.log('Standard frame extraction completed for:', mediaItem.name);
       }
       
     } catch (ffmpegError) {
@@ -438,7 +438,7 @@ export class MediaProcessor {
     let frameIndex = 1;
     
     try {
-      console.log('Reading extracted frames for:', mediaItem.name);
+      // console.log('Reading extracted frames for:', mediaItem.name);
       
       while (true) {
         const frameName = outputPattern.replace('%04d', frameIndex.toString().padStart(4, '0'));
@@ -484,7 +484,7 @@ export class MediaProcessor {
           
         } catch (readError) {
           // Expected when no more frames - this is normal end condition
-          console.log('No more frames to read for:', mediaItem.name, 'Total frames:', frameIndex - 1);
+          // console.log('No more frames to read for:', mediaItem.name, 'Total frames:', frameIndex - 1);
           break;
         }
       }
@@ -500,7 +500,7 @@ export class MediaProcessor {
     // Calculate actual duration based on extracted frames
     const actualDuration = frames.length / targetFPS;
     
-    console.log(`Successfully extracted ${frames.length} frames from ${mediaItem.name} at ${targetFPS} FPS, duration: ${actualDuration}s`);
+    // console.log(`Successfully extracted ${frames.length} frames from ${mediaItem.name} at ${targetFPS} FPS, duration: ${actualDuration}s`);
     
     return {
       type: 'animated',
@@ -513,7 +513,7 @@ export class MediaProcessor {
 
   async extractStaticFrame(inputFileName, outputName) {
     try {
-      console.log('Extracting static frame for:', inputFileName, 'Output:', outputName);
+      // console.log('Extracting static frame for:', inputFileName, 'Output:', outputName);
       
     // Convert to PNG with unique name
       const ffmpegArgs = [
@@ -525,9 +525,9 @@ export class MediaProcessor {
       outputName
       ];
       
-      console.log('FFmpeg static frame command:', ffmpegArgs.join(' '));
+      // console.log('FFmpeg static frame command:', ffmpegArgs.join(' '));
       await this.ffmpeg.exec(ffmpegArgs);
-      console.log('Static frame extraction completed');
+      // console.log('Static frame extraction completed');
       
     } catch (ffmpegError) {
       console.error('FFmpeg static frame extraction failed:', ffmpegError);
@@ -538,7 +538,7 @@ export class MediaProcessor {
     let frameData;
     try {
       frameData = await this.readFileWithRetry(outputName);
-      console.log('Static frame data read successfully:', frameData.byteLength, 'bytes');
+      // console.log('Static frame data read successfully:', frameData.byteLength, 'bytes');
       
     } catch (readError) {
       console.error('Failed to read static frame:', readError);
@@ -551,7 +551,7 @@ export class MediaProcessor {
     // Clean up frame file
     try {
       await this.ffmpeg.deleteFile(outputName);
-      console.log('Cleaned up static frame file:', outputName);
+      // console.log('Cleaned up static frame file:', outputName);
     } catch (deleteError) {
       console.warn('Could not delete static frame file:', outputName, deleteError);
     }
@@ -577,7 +577,7 @@ export class MediaProcessor {
         const nameParts = mediaItem.name.split('.');
         if (nameParts.length > 1) {
           extension = nameParts.pop().toLowerCase();
-          console.log('Extracted extension from filename:', extension);
+          // console.log('Extracted extension from filename:', extension);
         }
       } catch (error) {
         console.warn('Error extracting extension from filename:', mediaItem.name, error);
@@ -620,7 +620,7 @@ export class MediaProcessor {
     if (mediaItem.type === 'video') return 'mp4';
     if (mediaItem.type === 'audio') return 'mp3';
     
-    console.log('Using extension for', mediaItem.name, ':', extension);
+    // console.log('Using extension for', mediaItem.name, ':', extension);
     return extension;
   }
 
@@ -628,7 +628,7 @@ export class MediaProcessor {
   async readFileWithRetry(fileName, maxRetries = 3, delayMs = 100) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`Reading file ${fileName}, attempt ${attempt}/${maxRetries}`);
+        // console.log(`Reading file ${fileName}, attempt ${attempt}/${maxRetries}`);
         const fileData = await this.ffmpeg.readFile(fileName);
         
         // Validate file data
@@ -636,7 +636,7 @@ export class MediaProcessor {
           throw new Error('File data is empty');
         }
         
-        console.log(`Successfully read ${fileName}: ${fileData.byteLength} bytes`);
+        // console.log(`Successfully read ${fileName}: ${fileData.byteLength} bytes`);
         return fileData;
         
       } catch (error) {
@@ -814,13 +814,13 @@ export class MediaProcessor {
     }
     
     const existingFrameData = this.frameCache.get(cacheKey);
-    console.log(`🔄 Starting background rescaling for item ${mediaItemId} to ${targetWidth}x${targetHeight}`);
+    // console.log(`🔄 Starting background rescaling for item ${mediaItemId} to ${targetWidth}x${targetHeight}`);
     
     return new Promise((resolve, reject) => {
       const rescaleNextFrame = async (frameIndex) => {
         if (frameIndex >= existingFrameData.frames.length) {
           // All frames processed
-          console.log(`✅ Rescaling complete for item ${mediaItemId}`);
+          // console.log(`✅ Rescaling complete for item ${mediaItemId}`);
           onProgress?.(100, 'Rescaling complete');
           resolve(existingFrameData);
           return;

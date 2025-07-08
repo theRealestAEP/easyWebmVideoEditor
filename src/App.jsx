@@ -63,7 +63,7 @@ function App() {
       if (timelineRef.current?.getAudioElements) {
         const audioElements = timelineRef.current.getAudioElements();
         setTimelineAudioElements(audioElements);
-        console.log('📊 Updated VolumeBar audio elements:', audioElements.size, 'elements');
+        // console.log('📊 Updated VolumeBar audio elements:', audioElements.size, 'elements');
       }
     };
 
@@ -145,7 +145,7 @@ function App() {
 
   // Process files and add to source media
   const processFiles = useCallback(async (files) => {
-    console.log('Processing files:', files.length);
+    // console.log('Processing files:', files.length);
     
     const newSourceMedia = [];
     
@@ -189,12 +189,12 @@ function App() {
       sourceFileMap.current.set(itemId, file);
       
       newSourceMedia.push(sourceItem);
-      console.log('Added to source media:', sourceItem.name, sourceItem.type, sourceItem.duration);
+      // console.log('Added to source media:', sourceItem.name, sourceItem.type, sourceItem.duration);
       
       // For MP4 video files, automatically check for and create a separate audio track
       if (mediaType === 'video' && fileType === 'video/mp4') {
         try {
-          console.log('🎬 Checking MP4 for audio track:', file.name);
+          // console.log('🎬 Checking MP4 for audio track:', file.name);
           
           // Use a more reliable audio detection method
           const hasAudio = await new Promise((resolve) => {
@@ -234,23 +234,23 @@ function App() {
               // This is safer since most MP4s have audio and false positives are better than false negatives
               audioDetected = hasDuration || browserAudioDetected;
               
-              console.log('🔍 MP4 audio detection results:', {
-                name: file.name,
-                duration: video.duration,
-                audioTracks: audioTrackCount,
-                webkitAudioDecodedByteCount: webkitAudio,
-                mozHasAudio: mozAudio,
-                hasDuration: hasDuration,
-                browserAudioDetected: browserAudioDetected,
-                finalDecision: audioDetected
-              });
+              // console.log('🔍 MP4 audio detection results:', {
+              //   name: file.name,
+              //   duration: video.duration,
+              //   audioTracks: audioTrackCount,
+              //   webkitAudioDecodedByteCount: webkitAudio,
+              //   mozHasAudio: mozAudio,
+              //   hasDuration: hasDuration,
+              //   browserAudioDetected: browserAudioDetected,
+              //   finalDecision: audioDetected
+              // });
               
               cleanup();
               resolve(audioDetected);
             };
             
             video.onerror = (error) => {
-              console.warn('⚠️ Video loading failed for audio detection:', file.name, error);
+              // console.warn('⚠️ Video loading failed for audio detection:', file.name, error);
               cleanup();
               // If we can't load the video, assume it has audio to be safe
               resolve(true);
@@ -269,7 +269,7 @@ function App() {
           const shouldCreateAudioTrack = true; // Override detection for reliability
           
           if (shouldCreateAudioTrack) {
-            console.log('✅ Creating audio track for MP4:', file.name, '(Audio detected:', hasAudio, ')');
+            // console.log('✅ Creating audio track for MP4:', file.name, '(Audio detected:', hasAudio, ')');
             
             // Create a separate audio source media item
             const audioItemId = Date.now() + Math.random() + 0.1; // Slightly different ID
@@ -294,16 +294,16 @@ function App() {
             sourceItem.audioTrackId = audioItemId;
             
             newSourceMedia.push(audioSourceItem);
-            console.log('✅ Added audio track from MP4:', audioSourceItem.name);
+            // console.log('✅ Added audio track from MP4:', audioSourceItem.name);
           } else {
-            console.log('ℹ️ Skipping audio track creation for MP4:', file.name);
+            // console.log('ℹ️ Skipping audio track creation for MP4:', file.name);
           }
           
         } catch (audioDetectionError) {
           console.warn('❌ Error during MP4 audio detection:', file.name, audioDetectionError);
           
           // Fallback: create audio track anyway since detection failed
-          console.log('🔄 Creating audio track as fallback for:', file.name);
+          // console.log('🔄 Creating audio track as fallback for:', file.name);
           
           const audioItemId = Date.now() + Math.random() + 0.2;
           const audioSourceItem = {
@@ -326,7 +326,7 @@ function App() {
           sourceItem.audioTrackId = audioItemId;
           
           newSourceMedia.push(audioSourceItem);
-          console.log('✅ Added fallback audio track from MP4:', audioSourceItem.name);
+          // console.log('✅ Added fallback audio track from MP4:', audioSourceItem.name);
         }
       }
     }
@@ -337,12 +337,12 @@ function App() {
   // Process individual media file into PNG sequence
   const processMediaFile = useCallback(async (sourceItem, file) => {
     try {
-      console.log('Starting frame extraction for:', sourceItem.name, 'Has file object:', !!sourceItem.file);
+      // console.log('Starting frame extraction for:', sourceItem.name, 'Has file object:', !!sourceItem.file);
       
       // Extract frames using MediaProcessor with the sourceItem that includes the File object
       const frameData = await videoComposer.current.extractFrames(sourceItem);
       
-      console.log('Frame extraction completed for:', sourceItem.name);
+      // console.log('Frame extraction completed for:', sourceItem.name);
       
       // Update source media item with frame data
       setSourceMedia(prev => prev.map(item => 
@@ -372,7 +372,7 @@ function App() {
     // Check if this is an internal drag from source media - if so, ignore it
     const isInternalDrag = e.dataTransfer.types.includes('source-media');
     if (isInternalDrag) {
-      console.log('Ignoring internal source media drag');
+      // console.log('Ignoring internal source media drag');
       return;
     }
     
@@ -385,18 +385,13 @@ function App() {
     
     // Check for custom data (like from Tenor picker)
     try {
-      // The gif-picker-react might set different data formats
-      // Let's check all possible data types
-      console.log('Available data types:', e.dataTransfer.types);
-      
-      // Try different data formats that gif-picker-react might use
       let tenorData = null;
       
       // Try application/json first
       try {
         tenorData = e.dataTransfer.getData('application/json');
         if (tenorData) {
-          console.log('Found JSON data:', tenorData);
+          // console.log('Found JSON data:', tenorData);
         }
       } catch (err) {}
       
@@ -405,7 +400,7 @@ function App() {
         try {
           tenorData = e.dataTransfer.getData('text/plain');
           if (tenorData && (tenorData.includes('tenor') || tenorData.includes('gif'))) {
-            console.log('Found text data:', tenorData);
+            // console.log('Found text data:', tenorData);
           } else {
             tenorData = null; // Clear if not relevant
           }
@@ -417,7 +412,7 @@ function App() {
         try {
           const uriData = e.dataTransfer.getData('text/uri-list');
           if (uriData && (uriData.includes('tenor') || uriData.includes('.gif'))) {
-            console.log('Found URI data:', uriData);
+            // console.log('Found URI data:', uriData);
             
             // Extract name from Tenor URL if possible
             let stickerName = 'Tenor Sticker';
@@ -457,7 +452,7 @@ function App() {
             };
             
             setSourceMedia(prev => [...prev, mediaItem]);
-            console.log('Added Tenor item from URI to source media:', mediaItem);
+            // console.log('Added Tenor item from URI to source media:', mediaItem);
             return;
           }
         } catch (err) {}
@@ -466,7 +461,7 @@ function App() {
       if (tenorData) {
         try {
           const parsedData = JSON.parse(tenorData);
-          console.log('Parsed Tenor data:', parsedData);
+          // console.log('Parsed Tenor data:', parsedData);
           
           // Convert to our media format if it's a tenor item
           if (parsedData.url || parsedData.tenorUrl) {
@@ -487,7 +482,7 @@ function App() {
             };
             
             setSourceMedia(prev => [...prev, mediaItem]);
-            console.log('Added Tenor item to source media:', mediaItem);
+            // console.log('Added Tenor item to source media:', mediaItem);
             return;
           }
         } catch (parseErr) {
@@ -495,7 +490,7 @@ function App() {
         }
       }
       
-      console.log('No recognizable Tenor data found in drop');
+      // console.log('No recognizable Tenor data found in drop');
       
     } catch (error) {
       console.log('Error handling drop data:', error);
@@ -564,7 +559,7 @@ function App() {
       setIsPlaying(false);
       setIsExporting(true);
       setSelectedItem(null); // Clear selection to remove any active handles
-      console.log('Export mode enabled, waiting for canvas update...');
+      // console.log('Export mode enabled, waiting for canvas update...');
       setExportProgress({ progress: 0, status: 'Initializing...' });
       
       // Create timeline seek callback for canvas capture
@@ -688,7 +683,7 @@ function App() {
 
   // Handle Tenor GIF selection
   const handleTenorGifSelect = useCallback((gifMediaItem) => {
-    console.log('Adding Tenor GIF to source media:', gifMediaItem);
+    // console.log('Adding Tenor GIF to source media:', gifMediaItem);
     
     // Only add the selected GIF to source media - let user drag to timeline
     setSourceMedia(prev => [...prev, gifMediaItem]);
@@ -858,11 +853,11 @@ function App() {
   }, [handlePlayPause, selectedItem, exportProgress, handleUndo, handleRedo]);
 
   // Debug logging
-  useEffect(() => {
-    console.log('Current media items:', mediaItems);
-    console.log('Current time:', currentTime);
-    console.log('Is playing:', isPlaying);
-  }, [mediaItems, currentTime, isPlaying]);
+  // useEffect(() => {
+    // console.log('Current media items:', mediaItems);
+    // console.log('Current time:', currentTime);
+    // console.log('Is playing:', isPlaying);
+  // }, [mediaItems, currentTime, isPlaying]);
 
   const getMediaTypeIcon = useCallback((item) => {
     switch (item.type) {
@@ -1312,6 +1307,7 @@ function App() {
                 onDurationChange={setDuration}
                 playbackFrameRate={settings.exportFrameRate}
                 restoreFileForItem={restoreFileForItem}
+                exportMode={isExporting}
               />
             </div>
             

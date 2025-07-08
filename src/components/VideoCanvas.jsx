@@ -59,7 +59,7 @@ const VideoCanvas = ({
     
     try {
       const sourceItem = JSON.parse(droppedData);
-      console.log('Dropped source item onto canvas:', sourceItem);
+      // console.log('Dropped source item onto canvas:', sourceItem);
       
       // Get the canvas container element for position calculation
       const canvasContainer = e.currentTarget;
@@ -78,14 +78,14 @@ const VideoCanvas = ({
       const clampedX = Math.max(0, Math.min(actualCanvasX, CANVAS_WIDTH));
       const clampedY = Math.max(0, Math.min(actualCanvasY, CANVAS_HEIGHT));
       
-      console.log('Canvas drop coordinates:', {
-        displayDrop: { x: dropX, y: dropY },
-        actualCanvas: { x: actualCanvasX, y: actualCanvasY },
-        clamped: { x: clampedX, y: clampedY },
-        scale: scale,
-        displaySize: displaySize,
-        canvasSize: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
-      });
+      // console.log('Canvas drop coordinates:', {
+      //   displayDrop: { x: dropX, y: dropY },
+      //   actualCanvas: { x: actualCanvasX, y: actualCanvasY },
+      //   clamped: { x: clampedX, y: clampedY },
+      //   scale: scale,
+      //   displaySize: displaySize,
+      //   canvasSize: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
+      // });
       
       // Create timeline item from source item
       const timelineItem = {
@@ -105,7 +105,7 @@ const VideoCanvas = ({
       // Restore File object if this came from uploaded media and we have a restore function
       const restoredItem = restoreFileForItem ? restoreFileForItem(timelineItem) : timelineItem;
       
-      console.log('Creating timeline item from canvas drop:', restoredItem);
+      // console.log('Creating timeline item from canvas drop:', restoredItem);
       
       // Add to timeline if we have the callback
       if (onItemsUpdate) {
@@ -152,7 +152,7 @@ const VideoCanvas = ({
   // Force canvas refresh when dragging ends
   useEffect(() => {
     if (!isDragging && fabricCanvas.current) {
-      console.log('Dragging ended - force canvas refresh');
+      // console.log('Dragging ended - force canvas refresh');
       // Clear all objects and let the main update effect repopulate
       fabricCanvas.current.clear();
       fabricObjects.current.clear();
@@ -165,7 +165,7 @@ const VideoCanvas = ({
       return mediaProcessors.current.get(item.id);
     }
 
-    console.log('🎬 Processing media item:', item.name);
+    // console.log('🎬 Processing media item:', item.name);
 
     try {
       let frameData;
@@ -173,14 +173,14 @@ const VideoCanvas = ({
       
       // Check if we have pre-processed frame data (from uploaded files)
       if (item.isPreProcessed && item.frameData) {
-        console.log('✅ Using pre-processed frame data for:', item.name);
+        // console.log('✅ Using pre-processed /frame data for:', item.name);
         frameData = item.frameData;
         processor = mediaProcessor.current.createProcessor(item, frameData);
         
         // No progress updates needed for pre-processed data
       } else {
         // Fall back to on-demand processing (for Tenor stickers, etc.)
-        console.log('🔄 Processing frames on-demand for:', item.name);
+        // console.log('🔄 Processing frames on-demand for:', item.name);
         frameData = await mediaProcessor.current.extractFrames(
           item,
           (progress, status) => {
@@ -192,15 +192,15 @@ const VideoCanvas = ({
       
       mediaProcessors.current.set(item.id, processor);
       
-      console.log('✅ Media processed successfully:', item.name, 
-                 'Frames:', frameData.frameCount, 
-                 'Actual duration:', frameData.duration,
-                 'Original duration:', item.duration,
-                 'Pre-processed:', !!item.isPreProcessed);
+      // console.log('✅ Media processed successfully:', item.name, 
+      //            'Frames:', frameData.frameCount, 
+      //            'Actual duration:', frameData.duration,
+      //            'Original duration:', item.duration,
+      //            'Pre-processed:', !!item.isPreProcessed);
       
       // Update the media item with the actual duration from frame extraction
       if (Math.abs(frameData.duration - item.duration) > 0.1) { // Only update if significantly different
-        console.log('🔄 Updating duration for', item.name, 'from', item.duration, 'to', frameData.duration);
+        // console.log('🔄 Updating duration for', item.name, 'from', item.duration, 'to', frameData.duration);
         const updatedItem = { ...item, duration: frameData.duration };
         onItemUpdate(updatedItem);
       }
@@ -212,7 +212,7 @@ const VideoCanvas = ({
       
       return processor;
     } catch (error) {
-      console.error('❌ Failed to process media:', item.name, error);
+      // console.error('❌ Failed to process media:', item.name, error);
       setProcessingStatus(`Failed to process ${item.name}`);
       setTimeout(() => setProcessingStatus(''), 3000);
       return null;
@@ -231,11 +231,11 @@ const VideoCanvas = ({
     // Set new timeout to trigger rescaling after user stops resizing
     const timeout = setTimeout(async () => {
       try {
-        console.log(`🎯 Triggering background rescaling for ${mediaItem.name} to ${newWidth}x${newHeight}`);
+        // console.log(`🎯 Triggering background rescaling for ${mediaItem.name} to ${newWidth}x${newHeight}`);
         
         // Check if frames are already at target size
         if (mediaProcessor.current.areFramesPreScaled(itemId, newWidth, newHeight)) {
-          console.log('Frames already pre-scaled to target size, skipping rescaling');
+          // console.log('Frames already pre-scaled to target size, skipping rescaling');
           return;
         }
         
@@ -257,7 +257,7 @@ const VideoCanvas = ({
         rescalingQueue.current.delete(itemId);
         setRescalingStatus('');
         
-        console.log(`✅ Background rescaling complete for ${mediaItem.name}`);
+        // console.log(`✅ Background rescaling complete for ${mediaItem.name}`);
         
       } catch (error) {
         console.error('Background rescaling failed:', error);
@@ -276,14 +276,14 @@ const VideoCanvas = ({
   const getCurrentFrameImage = useCallback((item, relativeTime) => {
     const processor = mediaProcessors.current.get(item.id);
     if (!processor) {
-      console.log('No processor for:', item.name);
+      // console.log('No processor for:', item.name);
       return null;
     }
 
     try {
       // Check if media should be visible at this time
       if (!processor.isVisibleAtTime(relativeTime)) {
-        console.log('Media not visible:', item.name, 'time:', relativeTime, 'duration:', processor.duration);
+        // console.log('Media not visible:', item.name, 'time:', relativeTime, 'duration:', processor.duration);
         return null; // Hide media when it's outside its duration
       }
       
@@ -291,7 +291,7 @@ const VideoCanvas = ({
       const clampedTime = Math.max(0, Math.min(relativeTime, processor.duration - 0.1));
       const frame = processor.getCurrentFrame(relativeTime);
       if (!frame) {
-        console.log('No frame available for:', item.name, 'at time:', relativeTime);
+        // console.log('No frame available for:', item.name, 'at time:', relativeTime);
         return null; // No frame available
       }
 
@@ -308,7 +308,7 @@ const VideoCanvas = ({
           frame.scaledWidth === targetWidth && 
           frame.scaledHeight === targetHeight) {
         // Use pre-scaled frame directly - no additional scaling needed!
-        console.log('Using pre-scaled frame for:', item.name, `${targetWidth}x${targetHeight}`);
+        // console.log('Using pre-scaled frame for:', item.name, `${targetWidth}x${targetHeight}`);
         return originalImg;
       }
       
@@ -333,12 +333,12 @@ const VideoCanvas = ({
   const createScaledImage = useCallback((originalImg, targetWidth, targetHeight) => {
     // If dimensions match, return original
     if (originalImg.width === targetWidth && originalImg.height === targetHeight) {
-      console.log('No scaling needed for frame');
+      // console.log('No scaling needed for frame');
       return originalImg;
     }
 
-    console.log('Scaling PNG frame from', originalImg.width, 'x', originalImg.height, 
-               'to', targetWidth, 'x', targetHeight);
+    // console.log('Scaling PNG frame from', originalImg.width, 'x', originalImg.height, 
+    //            'to', targetWidth, 'x', targetHeight);
 
     // Create canvas for scaling
     const canvas = document.createElement('canvas');
@@ -366,7 +366,7 @@ const VideoCanvas = ({
   useEffect(() => {
     if (!canvasRef.current || fabricCanvas.current) return;
 
-    console.log('Initializing Fabric canvas with fixed size:', CANVAS_WIDTH, 'x', CANVAS_HEIGHT);
+    // console.log('Initializing Fabric canvas with fixed size:', CANVAS_WIDTH, 'x', CANVAS_HEIGHT);
     fabricCanvas.current = new fabric.Canvas(canvasRef.current, {
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
@@ -407,9 +407,9 @@ const VideoCanvas = ({
         const actualWidth = obj.width * obj.scaleX;
         const actualHeight = obj.height * obj.scaleY;
         
-        console.log('Object being modified:', item.name, 
-                   'Old size:', item.width, 'x', item.height,
-                   'New size:', actualWidth, 'x', actualHeight);
+        // console.log('Object being modified:', item.name, 
+        //            'Old size:', item.width, 'x', item.height,
+        //            'New size:', actualWidth, 'x', actualHeight);
         
         const updatedItem = {
           ...item,
@@ -436,7 +436,7 @@ const VideoCanvas = ({
         // Update the mediaItem reference on the object
         obj.mediaItem = updatedItem;
         
-        console.log('Object modification complete:', updatedItem.name);
+        // console.log('Object modification complete:', updatedItem.name);
         
         canvas.renderAll();
         
@@ -445,7 +445,7 @@ const VideoCanvas = ({
         const heightChanged = Math.abs(actualHeight - item.height) > 5;
         
         if ((widthChanged || heightChanged) && (item.type === 'video' || item.type === 'image')) {
-          console.log('🔄 Scheduling background rescaling for:', item.name);
+          // console.log('🔄 Scheduling background rescaling for:', item.name);
           triggerRescaling(updatedItem, Math.round(actualWidth), Math.round(actualHeight));
         }
         
@@ -528,7 +528,7 @@ const VideoCanvas = ({
       // Force re-render
       canvas.renderAll();
       
-      console.log('Canvas updated for export mode:', exportMode, 'Objects:', canvas.getObjects().length);
+      // console.log('Canvas updated for export mode:', exportMode, 'Objects:', canvas.getObjects().length);
     }
   }, [exportMode]);
 
@@ -536,7 +536,7 @@ const VideoCanvas = ({
   useEffect(() => {
     // Filter out audio items - they don't need visual processing
     const visualMediaItems = mediaItems.filter(item => item.type !== 'audio');
-    console.log('Processing visual media items:', visualMediaItems.length);
+    // console.log('Processing visual media items:', visualMediaItems.length);
     
     const processAllMedia = async () => {
       for (const item of visualMediaItems) {
@@ -556,7 +556,7 @@ const VideoCanvas = ({
     // Skip updates if user is currently modifying objects ON THE CANVAS
     // But allow updates during timeline drag operations
     if (isModifyingObject.current) {
-      console.log('Skipping canvas update - object being modified');
+      // console.log('Skipping canvas update - object being modified');
       return;
     }
 
@@ -574,7 +574,7 @@ const VideoCanvas = ({
              currentTime < item.startTime + actualDuration;
     });
 
-    console.log('Updating canvas. Current time:', currentTime, 'Active visual items:', activeItems.length);
+    // console.log('Updating canvas. Current time:', currentTime, 'Active visual items:', activeItems.length);
 
     // Remove objects that are no longer active OR have no valid frame
     const currentObjects = canvas.getObjects();
@@ -597,11 +597,11 @@ const VideoCanvas = ({
         const shouldRemove = isDragging ? !stillExists : (!stillExists || !isInTimeBounds || !isVisibleByProcessor);
         
         if (shouldRemove) {
-          console.log('Removing object:', obj.mediaItem.name, 
-                     'InTimeBounds:', isInTimeBounds, 
-                     'VisibleByProcessor:', isVisibleByProcessor,
-                     'RelativeTime:', relativeTime,
-                     'ActualDuration:', actualDuration);
+          // console.log('Removing object:', obj.mediaItem.name, 
+          //            'InTimeBounds:', isInTimeBounds, 
+          //            'VisibleByProcessor:', isVisibleByProcessor,
+          //            'RelativeTime:', relativeTime,
+          //            'ActualDuration:', actualDuration);
           canvas.remove(obj);
           fabricObjects.current.delete(obj.mediaItem.id);
         }
@@ -614,7 +614,7 @@ const VideoCanvas = ({
       const processor = mediaProcessors.current.get(item.id);
       
       if (!processor) {
-        console.warn('No processor found for:', item.name, '- still processing...');
+        // console.warn('No processor found for:', item.name, '- still processing...');
         return;
       }
 
@@ -624,7 +624,7 @@ const VideoCanvas = ({
       // Handle both sync and async results
       const processFrameImage = (frameImg) => {
         if (!frameImg) {
-          console.log('No frame available for:', item.name, 'at time:', relativeTime, '- skipping');
+          // console.log('No frame available for:', item.name, 'at time:', relativeTime, '- skipping');
           return;
         }
 
@@ -642,12 +642,12 @@ const VideoCanvas = ({
           const dimensionsMatch = Math.abs(currentActualWidth - item.width) < 1 && 
                                  Math.abs(currentActualHeight - item.height) < 1;
           
-          console.log('Updating existing object:', item.name,
-                     'Recently modified:', isRecentlyModified,
-                     'User modified:', isUserModified,
-                     'Dimensions match:', dimensionsMatch,
-                     'Current:', currentActualWidth, 'x', currentActualHeight,
-                     'Stored:', item.width, 'x', item.height);
+          // console.log('Updating existing object:', item.name,
+          //            'Recently modified:', isRecentlyModified,
+          //            'User modified:', isUserModified,
+          //            'Dimensions match:', dimensionsMatch,
+          //            'Current:', currentActualWidth, 'x', currentActualHeight,
+          //            'Stored:', item.width, 'x', item.height);
           
           // Always update position, rotation, opacity
           const updateProps = {
@@ -708,7 +708,7 @@ const VideoCanvas = ({
         }
 
         // Create new object with scaled PNG
-        console.log('Adding scaled media to canvas:', item.name, 'Processor type:', processor.type);
+        // console.log('Adding scaled media to canvas:', item.name, 'Processor type:', processor.type);
         
         const createFabricObject = () => {
           try {
@@ -815,9 +815,9 @@ const VideoCanvas = ({
                 const isVisibleByProcessor = processor.isVisibleAtTime(relativeTime);
                 
                 if (!isInTimeBounds || !isVisibleByProcessor) {
-                  console.log('Removing object during animation:', obj.mediaItem.name, 
-                             'InTimeBounds:', isInTimeBounds, 
-                             'VisibleByProcessor:', isVisibleByProcessor);
+                  // console.log('Removing object during animation:', obj.mediaItem.name, 
+                  //            'InTimeBounds:', isInTimeBounds, 
+                  //            'VisibleByProcessor:', isVisibleByProcessor);
                   fabricCanvas.current.remove(obj);
                   fabricObjects.current.delete(obj.mediaItem.id);
                   return;
@@ -844,7 +844,7 @@ const VideoCanvas = ({
                     }
                   } else if (!frameImg) {
                     // No frame available - remove object
-                    console.log('No frame during animation, removing:', obj.mediaItem.name);
+                    // console.log('No frame during animation, removing:', obj.mediaItem.name);
                     fabricCanvas.current.remove(obj);
                     fabricObjects.current.delete(obj.mediaItem.id);
                   }
@@ -939,7 +939,7 @@ const VideoCanvas = ({
             // Clear user modified flag after 10 seconds
             if (Date.now() - obj._lastModified > 10000) {
               obj._userModified = false;
-              console.log('Cleared user modification flag for:', obj.mediaItem?.name);
+              // console.log('Cleared user modification flag for:', obj.mediaItem?.name);
             }
           }
         });

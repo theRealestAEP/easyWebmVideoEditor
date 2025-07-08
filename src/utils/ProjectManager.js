@@ -88,13 +88,13 @@ class ProjectManager {
     // Clear redo stack when new action is performed
     this.redoStack = [];
     
-    console.log('State pushed to undo stack. Stack size:', this.undoStack.length);
+    // console.log('State pushed to undo stack. Stack size:', this.undoStack.length);
   }
 
   // Undo last action
   undo(currentState) {
     if (this.undoStack.length <= 1) {
-      console.log('Nothing to undo');
+      // console.log('Nothing to undo');
       return null;
     }
     
@@ -106,7 +106,7 @@ class ProjectManager {
     this.undoStack.pop();
     const previousState = this.undoStack[this.undoStack.length - 1];
     
-    console.log('Undo performed. Undo stack size:', this.undoStack.length, 'Redo stack size:', this.redoStack.length);
+    // console.log('Undo performed. Undo stack size:', this.undoStack.length, 'Redo stack size:', this.redoStack.length);
     return previousState;
   }
 
@@ -120,7 +120,7 @@ class ProjectManager {
     const nextState = this.redoStack.pop();
     this.undoStack.push(nextState);
     
-    console.log('Redo performed. Undo stack size:', this.undoStack.length, 'Redo stack size:', this.redoStack.length);
+    // console.log('Redo performed. Undo stack size:', this.undoStack.length, 'Redo stack size:', this.redoStack.length);
     return nextState;
   }
 
@@ -262,7 +262,7 @@ class ProjectManager {
         sourceMedia: restoredSourceMedia
       };
       
-      console.log('Project loaded successfully:', project.name);
+      // console.log('Project loaded successfully:', project.name);
       return { success: true, project: restoredProject };
       
     } catch (error) {
@@ -331,7 +331,7 @@ class ProjectManager {
       // Delete project
       await projectStore.delete(projectId);
       
-      console.log('Project deleted successfully:', projectId);
+      // console.log('Project deleted successfully:', projectId);
       return { success: true };
       
     } catch (error) {
@@ -369,7 +369,7 @@ class ProjectManager {
   clearHistory() {
     this.undoStack = [];
     this.redoStack = [];
-    console.log('Undo/redo history cleared');
+    // console.log('Undo/redo history cleared');
   }
 
   // Check if undo is available

@@ -23,7 +23,7 @@ export class VideoComposer {
       });
 
       this.initialized = true;
-      console.log('✅ FFmpeg initialized successfully');
+      // console.log('✅ FFmpeg initialized successfully');
     } catch (error) {
       console.error('Failed to initialize FFmpeg:', error);
       throw new Error('Failed to initialize video encoder');
@@ -88,9 +88,9 @@ export class VideoComposer {
             originalVideoItem: videoItem // Keep reference to original video item
           };
           allAudioSources.push(videoAudioItem);
-          console.log('📹 Creating virtual audio track for video:', videoItem.name);
+          // console.log('📹 Creating virtual audio track for video:', videoItem.name);
         } else {
-          console.log('⏭️ Skipping virtual audio track for video (separate track exists):', videoItem.name, 'hasAudioTrack:', videoItem.hasAudioTrack);
+          // console.log('⏭️ Skipping virtual audio track for video (separate track exists):', videoItem.name, 'hasAudioTrack:', videoItem.hasAudioTrack);
         }
       });
 
@@ -105,43 +105,21 @@ export class VideoComposer {
         const allMediaEndTimes = allMediaForDuration.map(item => item.startTime + item.duration);
         actualDuration = Math.max(...allMediaEndTimes);
         
-        console.log('📏 Perfect Loop Duration Calculation:', {
-          originalTimelineDuration: duration,
-          totalMediaItems: allMediaForDuration.length,
-          originalMediaItems: mediaItems.length,
-          virtualVideoAudioItems: allAudioSources.filter(item => item.isVideoAudio).length,
-          mediaEndTimes: allMediaEndTimes,
-          actualDuration: actualDuration,
-          savedTime: (duration - actualDuration).toFixed(2) + 's (no blank frames!)'
-        });
       } else {
         // Fallback to original duration if no media items
         actualDuration = duration;
-        console.log('📏 No media items found, using timeline duration:', actualDuration);
+        // console.log('📏 No media items found, using timeline duration:', actualDuration);
       }
 
-      console.log('🎬 Starting 3-Step Export Process:', {
-        totalItems: mediaItems.length,
-        audioItems: audioItems.length,
-        videoItems: videoItems.length,
-        videoAudioTracks: videoItems.length, // Video files that contribute audio
-        totalAudioSources: allAudioSources.length, // All audio sources including video audio
-        visualItems: visualItems.length,
-        originalDuration: duration,
-        actualDuration: actualDuration,
-        dimensions: `${width}x${height}`,
-        fps
-      });
-
       // STEP 1: Canvas Capture → Video
-      console.log('📹 STEP 1: Capturing video from canvas...');
+      // console.log('📹 STEP 1: Capturing video from canvas...');
       const videoBlob = await this.captureCanvasVideo({ 
         width, height, fps, duration: actualDuration, onTimelineSeek, onProgress: (progress, status) => {
           safeOnProgress(progress * 0.6, status); // 0-60% for video capture
         }
       });
       
-      console.log('✅ STEP 1 Complete - Video captured:', videoBlob.size, 'bytes');
+      // console.log('✅ STEP 1 Complete - Video captured:', videoBlob.size, 'bytes');
 
       // STEP 2: Audio Mixing → Single Audio Track  
       let finalAudioBlob = null;
@@ -150,22 +128,22 @@ export class VideoComposer {
         finalAudioBlob = await this.mixAudioTracks(allAudioSources, actualDuration, (progress, status) => {
           safeOnProgress(60 + progress * 0.3, status); // 60-90% for audio mixing
         });
-        console.log('✅ STEP 2 Complete - Audio mixed:', finalAudioBlob?.size || 0, 'bytes');
+        // console.log('✅ STEP 2 Complete - Audio mixed:', finalAudioBlob?.size || 0, 'bytes');
       } else {
-        console.log('⏭️ STEP 2 Skipped - No audio tracks found');
+        // console.log('⏭️ STEP 2 Skipped - No audio tracks found');
       }
 
       // STEP 3: Final Combination → Video + Audio
-      console.log('🎬 STEP 3: Combining video and audio...');
+      // console.log('🎬 STEP 3: Combining video and audio...');
       const finalBlob = await this.combineVideoAndAudio(videoBlob, finalAudioBlob, actualDuration, (progress, status) => {
         safeOnProgress(90 + progress * 0.1, status); // 90-100% for final combination
       });
       
-      console.log('✅ STEP 3 Complete - Final export:', finalBlob.size, 'bytes');
+      // console.log('✅ STEP 3 Complete - Final export:', finalBlob.size, 'bytes');
 
       safeOnProgress(100, 'Export complete! 🎉');
       const url = URL.createObjectURL(finalBlob);
-      console.log('🎉 3-Step Export Process Completed Successfully!');
+      console.log('🎉Export Process Completed Successfully!');
       
       return { url, blob: finalBlob };
 
@@ -302,15 +280,15 @@ export class VideoComposer {
     try {
       await this.initialize();
       
-      console.log('🎵 === STEP 2: PROPER MULTI-TRACK AUDIO MIXING ===');
-      console.log('🎵 Processing', audioItems.length, 'audio tracks for', totalDuration, 'seconds');
-      console.log('🎵 Audio details:', audioItems.map(item => ({
-        name: item.name,
-        startTime: item.startTime,
-        duration: item.duration,
-        fileSize: item.file?.size,
-        fileType: item.file?.type
-      })));
+      // console.log('🎵 === STEP 2: PROPER MULTI-TRACK AUDIO MIXING ===');
+      // console.log('🎵 Processing', audioItems.length, 'audio tracks for', totalDuration, 'seconds');
+      // console.log('🎵 Audio details:', audioItems.map(item => ({
+      //   name: item.name,
+      //   startTime: item.startTime,
+      //   duration: item.duration,
+      //   fileSize: item.file?.size,
+      //   fileType: item.file?.type
+      // })));
       
       // PATCH FIXES APPLIED:
       // ✅ Patch 1: No silent base + asetpts=PTS-STARTPTS + duration=longest + direct WebM output
@@ -318,7 +296,7 @@ export class VideoComposer {
       // 🔍 Quick checklist: mixed_audio.webm should have proper duration and be audible when played alone
       
       if (audioItems.length === 0) {
-        console.log('❌ No audio items to process');
+        // console.log('❌ No audio items to process');
         return null;
       }
       
@@ -336,12 +314,12 @@ export class VideoComposer {
           let audioBlob;
           if (audioItem.file && audioItem.file instanceof File) {
             audioBlob = audioItem.file;
-            console.log(`📁 Using File object: ${audioItem.file.type}, ${audioItem.file.size} bytes`);
+            // console.log(`📁 Using File object: ${audioItem.file.type}, ${audioItem.file.size} bytes`);
           } else if (audioItem.url) {
-            console.log(`🌐 Fetching from URL: ${audioItem.url}`);
+            // console.log(`🌐 Fetching from URL: ${audioItem.url}`);
             const response = await fetch(audioItem.url);
             audioBlob = await response.blob();
-            console.log(`✅ Fetched: ${audioBlob.type}, ${audioBlob.size} bytes`);
+            // console.log(`✅ Fetched: ${audioBlob.type}, ${audioBlob.size} bytes`);
           } else {
             console.warn('❌ Skipping audio item with no valid source:', audioItem.name);
             continue;
@@ -349,7 +327,7 @@ export class VideoComposer {
           
           // For video audio items, we need to extract just the audio track
           if (audioItem.isVideoAudio) {
-            console.log(`🎬 Extracting audio from video file: ${audioItem.name}`);
+            // console.log(`🎬 Extracting audio from video file: ${audioItem.name}`);
             
             // Write the video file temporarily
             const tempVideoFile = `temp_video_${i}.mp4`;
@@ -374,7 +352,7 @@ export class VideoComposer {
             await this.ffmpeg.deleteFile(tempVideoFile);
             await this.ffmpeg.deleteFile(extractedAudioFile);
             
-            console.log(`✅ Audio extracted from video: ${audioBlob.size} bytes`);
+            // console.log(`✅ Audio extracted from video: ${audioBlob.size} bytes`);
           }
           
           await this.ffmpeg.writeFile(audioFileName, await fetchFile(audioBlob));
@@ -387,7 +365,7 @@ export class VideoComposer {
             originalSize: audioBlob.size
           });
           
-          console.log(`✅ Prepared: ${audioItem.name} (${audioItem.startTime}s - ${audioItem.startTime + audioItem.duration}s)`);
+          // console.log(`✅ Prepared: ${audioItem.name} (${audioItem.startTime}s - ${audioItem.startTime + audioItem.duration}s)`);
         } catch (error) {
           console.error(`❌ Failed to prepare ${audioItem.name}:`, error);
           continue;
@@ -399,7 +377,7 @@ export class VideoComposer {
         return null;
       }
       
-      console.log(`📊 Successfully prepared ${audioFiles.length} audio files`);
+      // console.log(`📊 Successfully prepared ${audioFiles.length} audio files`);
       
       onProgress(40, 'Building proper filter graph...');
       
@@ -408,7 +386,7 @@ export class VideoComposer {
       
       // For single audio starting at 0, still use simple approach for efficiency
       if (audioFiles.length === 1 && audioFiles[0].startTime === 0) {
-        console.log('🎵 Single audio at time 0 - returning directly in WebM format');
+        // console.log('🎵 Single audio at time 0 - returning directly in WebM format');
         
         // Convert single audio to WebM format directly
         await this.ffmpeg.exec([
@@ -426,7 +404,7 @@ export class VideoComposer {
         // Immediate cleanup
         await this.cleanupAudioFiles(['mixed_audio.webm', ...audioFiles.map(f => f.fileName)]);
         
-        console.log(`✅ Single audio converted to WebM: ${audioBlob.size} bytes`);
+        // console.log(`✅ Single audio converted to WebM: ${audioBlob.size} bytes`);
         return audioBlob;
       }
       
@@ -458,7 +436,7 @@ export class VideoComposer {
         filterParts.map((_, i) => `[a${i}]`).join('') +
         `amix=inputs=${audioFiles.length}:duration=longest:dropout_transition=0[m]`;
       
-      console.log('🎛️ Proper audio mix filter:', mixFilter);
+      // console.log('🎛️ Proper audio mix filter:', mixFilter);
       
       // Execute mixing directly to WebM format
       const mixCommand = [
@@ -472,14 +450,14 @@ export class VideoComposer {
         'mixed_audio.webm' // Write directly to WebM format!
       ];
       
-      console.log('🎛️ Mix command:', mixCommand.join(' '));
+      // console.log('🎛️ Mix command:', mixCommand.join(' '));
       await this.ffmpeg.exec(mixCommand);
       
       onProgress(80, 'Reading mixed audio...');
       
       // Read and immediately cleanup
       const audioData = await this.ffmpeg.readFile('mixed_audio.webm');
-      console.log(`✅ Mixed audio read: ${audioData.byteLength} bytes`);
+      // console.log(`✅ Mixed audio read: ${audioData.byteLength} bytes`);
       
       // Immediate cleanup
       await this.cleanupAudioFiles(['mixed_audio.webm', ...audioFiles.map(f => f.fileName)]);
@@ -487,8 +465,8 @@ export class VideoComposer {
       const audioBlob = new Blob([audioData.buffer.slice(0, audioData.byteLength)], { type: 'video/webm' });
       
       onProgress(100, 'Multi-track audio mixing complete');
-      console.log('✅ Multi-track audio mixing successful, final size:', audioBlob.size, 'bytes');
-      console.log('🎵 === END STEP 2: PROPER FILTER GRAPH SUCCESS ===');
+      // console.log('✅ Multi-track audio mixing successful, final size:', audioBlob.size, 'bytes');
+      // console.log('🎵 === END STEP 2: PROPER FILTER GRAPH SUCCESS ===');
       
       return audioBlob;
       
@@ -513,20 +491,20 @@ export class VideoComposer {
     try {
       await this.initialize();
       
-      console.log('🎬 === STEP 3: VIDEO/AUDIO COMBINATION DEBUG ===');
-      console.log('📊 Input video size:', videoBlob?.size || 0, 'bytes');
-      console.log('📊 Input audio size:', audioBlob?.size || 0, 'bytes');
-      console.log('📊 Target duration:', duration, 'seconds');
+      // console.log('🎬 === STEP 3: VIDEO/AUDIO COMBINATION DEBUG ===');
+      // console.log('📊 Input video size:', videoBlob?.size || 0, 'bytes');
+      // console.log('📊 Input audio size:', audioBlob?.size || 0, 'bytes');
+      // console.log('📊 Target duration:', duration, 'seconds');
       
       onProgress(20, 'Writing video file...');
-      console.log('📝 Writing video to FFmpeg filesystem...');
+      // console.log('📝 Writing video to FFmpeg filesystem...');
       
       try {
         await this.ffmpeg.writeFile('video.webm', await fetchFile(videoBlob));
         
         // Verify video file
         const writtenVideoData = await this.ffmpeg.readFile('video.webm');
-        console.log(`✅ Video written and verified: ${writtenVideoData.byteLength} bytes`);
+        // console.log(`✅ Video written and verified: ${writtenVideoData.byteLength} bytes`);
         
         if (writtenVideoData.byteLength !== videoBlob.size) {
           console.warn(`⚠️ Video size mismatch: expected ${videoBlob.size}, got ${writtenVideoData.byteLength}`);
@@ -550,11 +528,11 @@ export class VideoComposer {
         return videoBlob;
       }
       
-      console.log('✅ Audio blob validation passed:', {
-        size: audioBlob.size,
-        type: audioBlob.type || 'undefined',
-        hasBlob: audioBlob instanceof Blob
-      });
+      // console.log('✅ Audio blob validation passed:', {
+      //   size: audioBlob.size,
+      //   type: audioBlob.type || 'undefined',
+      //   hasBlob: audioBlob instanceof Blob
+      // });
       
       onProgress(40, 'Writing audio file...');
       console.log('📝 Writing audio to FFmpeg filesystem...');
@@ -575,32 +553,32 @@ export class VideoComposer {
             audioFileName = 'audio.wav';
           } else {
             // Unknown audio type, but our mixing produces WebM
-            console.log('⚠️ Unknown audio type:', audioBlob.type, '- defaulting to WebM (from mixing)');
+            // console.log('⚠️ Unknown audio type:', audioBlob.type, '- defaulting to WebM (from mixing)');
             audioFileName = 'audio.webm';
           }
         } else {
-          console.log('⚠️ Audio blob has no type property - defaulting to WebM (from mixing)');
+          // console.log('⚠️ Audio blob has no type property - defaulting to WebM (from mixing)');
           audioFileName = 'audio.webm'; // Default to WebM since our mixing produces WebM
         }
         
-        console.log('📊 Audio blob details:', {
-          size: audioBlob.size,
-          type: audioBlob.type || 'undefined',
-          fileName: audioFileName
-        });
+        // console.log('📊 Audio blob details:', {
+        //   size: audioBlob.size,
+        //   type: audioBlob.type || 'undefined',
+        //   fileName: audioFileName
+        // });
         
         await this.ffmpeg.writeFile(audioFileName, await fetchFile(audioBlob));
         
         // Verify audio file
         const writtenAudioData = await this.ffmpeg.readFile(audioFileName);
-        console.log(`✅ Audio written and verified: ${audioFileName}, ${writtenAudioData.byteLength} bytes`);
+        // console.log(`✅ Audio written and verified: ${audioFileName}, ${writtenAudioData.byteLength} bytes`);
         
         if (writtenAudioData.byteLength !== audioBlob.size) {
           console.warn(`⚠️ Audio size mismatch: expected ${audioBlob.size}, got ${writtenAudioData.byteLength}`);
         }
         
         onProgress(60, 'Combining video and audio...');
-        console.log('🎬 Starting video/audio combination...');
+        // console.log('🎬 Starting video/audio combination...');
         
         // PATCH 2: Mux without re-encoding - both inputs are WebM compatible
         // VP9 video + Vorbis audio = just metadata pass-through, minimal memory usage
@@ -618,12 +596,12 @@ export class VideoComposer {
           'final.webm'
         ];
         
-        console.log('🎛️ Combination command:', combineCommand.join(' '));
-        console.log('🔄 Executing combination (this is where the error likely occurs)...');
+        // console.log('🎛️ Combination command:', combineCommand.join(' '));
+        // console.log('🔄 Executing combination (this is where the error likely occurs)...');
         
         await this.ffmpeg.exec(combineCommand);
         
-        console.log('✅ Combination command completed successfully');
+        // console.log('✅ Combination command completed successfully');
         
         onProgress(80, 'Reading final export...');
         
@@ -645,8 +623,8 @@ export class VideoComposer {
         // No additional cleanup needed - already done above
         
         onProgress(100, 'Export complete');
-        console.log('✅ Final combination successful, size:', finalBlob.size, 'bytes');
-        console.log('🎬 === END STEP 3: ZERO RE-ENCODING SUCCESS ===');
+        // console.log('✅ Final combination successful, size:', finalBlob.size, 'bytes');
+        // console.log('🎬 === END STEP 3: ZERO RE-ENCODING SUCCESS ===');
         
         return finalBlob;
         

@@ -10,7 +10,7 @@ const TenorSearch = ({ onStickerSelect }) => {
   const [error, setError] = useState(null);
   const [nextPos, setNextPos] = useState(null);
 
-  console.log('Tenor API Key available:', !!TENOR_API_KEY);
+  // console.log('Tenor API Key available:', !!TENOR_API_KEY);
 
   // Search for stickers using Tenor API with proper transparency filtering
   const searchStickers = async (query = '', loadMore = false) => {
@@ -48,7 +48,7 @@ const TenorSearch = ({ onStickerSelect }) => {
       const endpoint = query.trim() ? 'search' : 'featured';
       const apiUrl = `https://tenor.googleapis.com/v2/${endpoint}?${params}`;
       
-      console.log('Making request to:', apiUrl);
+      // console.log('Making request to:', apiUrl);
       
       // Try using a simple and reliable CORS proxy
       const proxyUrl = 'https://corsproxy.io/?';
@@ -66,13 +66,13 @@ const TenorSearch = ({ onStickerSelect }) => {
       }
       
       const data = await response.json();
-      console.log('Raw Tenor API response:', data);
+      // console.log('Raw Tenor API response:', data);
       
       // Log a sample result to see what fields are available
-      if (data.results && data.results.length > 0) {
-        console.log('Sample result fields:', Object.keys(data.results[0]));
-        console.log('Sample result:', data.results[0]);
-      }
+      // if (data.results && data.results.length > 0) {
+      //   console.log('Sample result fields:', Object.keys(data.results[0]));
+      //   console.log('Sample result:', data.results[0]);
+      // }
       
       // Filter results to only those that have at least one transparent format
       const filteredResults = data.results?.filter(result => {
@@ -80,8 +80,8 @@ const TenorSearch = ({ onStickerSelect }) => {
       }) || [];
 
       const processedStickers = filteredResults.map(result => {
-        console.log('Processing result:', result);
-        console.log('Available media formats:', result.media_formats);
+        // console.log('Processing result:', result);
+        // console.log('Available media formats:', result.media_formats);
         
         // Prioritize transparent formats in order of preference
         let stickerUrl = null;
@@ -92,7 +92,7 @@ const TenorSearch = ({ onStickerSelect }) => {
         
         // Debug: Log all available formats for this result
         const availableFormats = Object.keys(result.media_formats || {});
-        console.log('Available formats for result', result.id, ':', availableFormats);
+        // console.log('Available formats for result', result.id, ':', availableFormats);
         
         // Try different transparent formats in order of preference (animated GIF first)
         const formatPriority = [
@@ -115,12 +115,12 @@ const TenorSearch = ({ onStickerSelect }) => {
               height = dims[1];
             }
             
-            console.log(`Selected ${format} format for result ${result.id}:`, {
-              url: stickerUrl,
-              dims: dims,
-              size: formatData.size || 'unknown',
-              duration: formatData.duration || 'unknown'
-            });
+            // console.log(`Selected ${format} format for result ${result.id}:`, {
+            //   url: stickerUrl,
+            //   dims: dims,
+            //   size: formatData.size || 'unknown',
+            //   duration: formatData.duration || 'unknown'
+            // });
             break;
           }
         }
@@ -130,7 +130,7 @@ const TenorSearch = ({ onStickerSelect }) => {
         for (const format of previewPriority) {
           if (result.media_formats?.[format]) {
             previewUrl = result.media_formats[format].url;
-            console.log(`Using ${format} for preview:`, previewUrl);
+            // console.log(`Using ${format} for preview:`, previewUrl);
             break;
           }
         }
@@ -144,7 +144,7 @@ const TenorSearch = ({ onStickerSelect }) => {
           return null;
         }
 
-        console.log('Final selected URLs:', { main: stickerUrl, preview: previewUrl });
+        // console.log('Final selected URLs:', { main: stickerUrl, preview: previewUrl });
 
         // Extract name from URL - much more reliable than API fields
         let stickerName = 'Tenor Sticker'; // Default fallback
@@ -173,7 +173,7 @@ const TenorSearch = ({ onStickerSelect }) => {
           // Keep default fallback
         }
 
-        console.log('Extracted sticker name:', stickerName, 'from URL:', stickerUrl);
+        // console.log('Extracted sticker name:', stickerName, 'from URL:', stickerUrl);
 
         return {
           id: result.id,
@@ -189,7 +189,7 @@ const TenorSearch = ({ onStickerSelect }) => {
         };
       }).filter(Boolean); // Remove any null results
 
-      console.log('Processed transparent stickers:', processedStickers);
+      // console.log('Processed transparent stickers:', processedStickers);
 
       if (loadMore) {
         setStickers(prev => [...prev, ...processedStickers]);
@@ -222,7 +222,7 @@ const TenorSearch = ({ onStickerSelect }) => {
 
   // Handle sticker selection
   const handleStickerClick = (sticker) => {
-    console.log('Selected Tenor Sticker:', sticker);
+    // console.log('Selected Tenor Sticker:', sticker);
     
     // Convert to our media format
     const mediaItem = {

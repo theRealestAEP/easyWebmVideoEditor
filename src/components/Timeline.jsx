@@ -17,7 +17,8 @@ const Timeline = forwardRef(({
   onItemsUpdate,
   onDurationChange,
   playbackFrameRate = 15, // Default to 15fps if not provided
-  restoreFileForItem // Function to restore File objects for uploaded media
+  restoreFileForItem, // Function to restore File objects for uploaded media
+  exportMode = false // Add exportMode prop to disable interactions during export
 }, ref) => {
   const timelineRef = useRef();
   const [isDragging, setIsDragging] = useState(false);
@@ -288,7 +289,7 @@ const Timeline = forwardRef(({
       });
     });
     
-    console.log('Track assignments - Video tracks:', finalVideoTracks.length, 'Audio tracks:', finalAudioTracks.length);
+    // console.log('Track assignments - Video tracks:', finalVideoTracks.length, 'Audio tracks:', finalAudioTracks.length);
     
     return { videoTracks: finalVideoTracks, audioTracks: finalAudioTracks };
   }, []);
@@ -302,7 +303,7 @@ const Timeline = forwardRef(({
   }), []);
 
   // Debug logging
-  console.log('Timeline rendering - trackAssignments:', trackAssignments, 'mediaItems:', mediaItems.length);
+  // console.log('Timeline rendering - trackAssignments:', trackAssignments, 'mediaItems:', mediaItems.length);
 
   // Playback timer
   useEffect(() => {
@@ -329,10 +330,10 @@ const Timeline = forwardRef(({
     const audioItems = mediaItems.filter(item => item.type === 'audio');
     const allAudioSources = [...audioItems];
     
-    console.log('Timeline audio management:', {
-      audioItems: audioItems.length,
-      totalAudioSources: allAudioSources.length
-    });
+    // console.log('Timeline audio management:', {
+    //   audioItems: audioItems.length,
+    //   totalAudioSources: allAudioSources.length
+    // });
     
     // Create audio elements for new audio sources (both audio files and video files)
     allAudioSources.forEach(item => {
@@ -342,10 +343,10 @@ const Timeline = forwardRef(({
         // Prioritize original File object for uploaded MP4s to preserve audio
         if (item.file && item.file instanceof File) {
           audioUrl = URL.createObjectURL(item.file);
-          console.log('Creating audio element from File object for:', item.name, 'type:', item.type);
+          // console.log('Creating audio element from File object for:', item.name, 'type:', item.type);
         } else if (item.url) {
           audioUrl = item.url;
-          console.log('Creating audio element from URL for:', item.name, 'type:', item.type);
+          // console.log('Creating audio element from URL for:', item.name, 'type:', item.type);
         } else {
           console.warn('No valid audio source found for:', item.name);
           return;
@@ -357,20 +358,20 @@ const Timeline = forwardRef(({
         
         // For video files, we're extracting the audio track for timeline playback
         if (item.type === 'video') {
-          console.log('Preserving audio track from video file:', item.name);
+          // console.log('Preserving audio track from video file:', item.name);
           
           // Handle MP4 audio track loading
           audio.addEventListener('loadedmetadata', () => {
-            console.log('MP4 audio metadata loaded:', {
-              name: item.name,
-              duration: audio.duration,
-              hasAudioTrack: audio.duration > 0
-            });
+            // console.log('MP4 audio metadata loaded:', {
+            //   name: item.name,
+            //   duration: audio.duration,
+            //   hasAudioTrack: audio.duration > 0
+            // });
           });
           
           // Handle potential audio loading issues
           audio.addEventListener('error', (e) => {
-            console.warn('Audio loading failed for video file:', item.name, e);
+            // console.warn('Audio loading failed for video file:', item.name, e);
           });
         }
         
@@ -388,7 +389,7 @@ const Timeline = forwardRef(({
           URL.revokeObjectURL(audio.src);
         }
         audioElements.current.delete(id);
-        console.log('Removed audio element for deleted item:', id);
+        // console.log('Removed audio element for deleted item:', id);
       }
     }
 
@@ -411,14 +412,14 @@ const Timeline = forwardRef(({
         }
         
         if (audio.paused) {
-          console.log('Starting audio playback for:', item.name, 'type:', item.type, 'at time:', audioTime.toFixed(2));
+          // console.log('Starting audio playback for:', item.name, 'type:', item.type, 'at time:', audioTime.toFixed(2));
           audio.play().catch(error => {
             console.warn('Audio play failed for', item.name, ':', error);
           });
         }
       } else {
         if (!audio.paused) {
-          console.log('Pausing audio for:', item.name, 'type:', item.type);
+          // console.log('Pausing audio for:', item.name, 'type:', item.type);
           audio.pause();
         }
       }
@@ -490,6 +491,7 @@ const Timeline = forwardRef(({
 
   // Handle timeline click for scrubbing
   const handleTimelineClick = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     if (isDragging || isSelecting || isScrubbing) return;
     
     const rect = timelineRef.current.getBoundingClientRect();
@@ -499,10 +501,11 @@ const Timeline = forwardRef(({
     
     // Deselect all items when clicking on empty timeline
     setSelectedItems(new Set());
-  }, [scale, duration, onTimeUpdate, isDragging, isSelecting, isScrubbing]);
+  }, [scale, duration, onTimeUpdate, isDragging, isSelecting, isScrubbing, exportMode]);
 
   // Handle mouse down for scrubbing in timeline ruler
   const handleRulerMouseDown = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     // Don't start scrubbing if already dragging items
     if (isDragging) return;
 
@@ -524,10 +527,11 @@ const Timeline = forwardRef(({
 
     // Prevent default to avoid text selection
     e.preventDefault();
-  }, [scale, duration, onTimeUpdate, isDragging]);
+  }, [scale, duration, onTimeUpdate, isDragging, exportMode]);
 
   // Handle mouse down for drag-to-select (works in both ruler and tracks)
   const handleTimelineMouseDown = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     // Only start selection if not clicking on an item and not already dragging
     if (isDragging || e.target.classList.contains('timeline-item') || 
         e.target.closest('.timeline-item')) {
@@ -544,10 +548,11 @@ const Timeline = forwardRef(({
 
     // Prevent default to avoid text selection
     e.preventDefault();
-  }, [isDragging]);
+  }, [isDragging, exportMode]);
 
   // Handle mouse down for drag-to-select in tracks area
   const handleTracksMouseDown = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     // Only handle left-click (button 0) for selection
     // Right-click (button 2) should be handled by onContextMenu on timeline items
     if (e.button !== 0) return;
@@ -572,7 +577,7 @@ const Timeline = forwardRef(({
 
     // Prevent default to avoid text selection
     e.preventDefault();
-  }, [isDragging]);
+  }, [isDragging, exportMode]);
 
   // Handle mouse move for drag-to-select (updated to work from anywhere)
   const handleTimelineMouseMove = useCallback((e) => {
@@ -650,6 +655,7 @@ const Timeline = forwardRef(({
 
   // Handle drop from source media
   const handleTimelineDrop = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     e.preventDefault();
     
     // Deselect all items when dropping new media
@@ -660,7 +666,7 @@ const Timeline = forwardRef(({
       if (!droppedData) return;
       
       const sourceItem = JSON.parse(droppedData);
-      console.log('Dropped source item onto timeline:', sourceItem);
+      // console.log('Dropped source item onto timeline:', sourceItem);
       
       // Calculate drop position
       const rect = timelineRef.current.getBoundingClientRect();
@@ -734,7 +740,7 @@ const Timeline = forwardRef(({
       // Restore File object if this came from uploaded media and we have a restore function
       const restoredItem = restoreFileForItem ? restoreFileForItem(timelineItem) : timelineItem;
       
-      console.log('Creating timeline item:', restoredItem);
+      // console.log('Creating timeline item:', restoredItem);
       
       // Add to timeline
       const updatedItems = [...mediaItems, restoredItem];
@@ -743,15 +749,17 @@ const Timeline = forwardRef(({
     } catch (error) {
       console.error('Error handling timeline drop:', error);
     }
-  }, [scale, mediaItems, onItemsUpdate, restoreFileForItem]);
+  }, [scale, mediaItems, onItemsUpdate, restoreFileForItem, exportMode]);
 
   const handleTimelineDragOver = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-  }, []);
+  }, [exportMode]);
 
   // Handle mouse down on timeline items
   const handleItemMouseDown = useCallback((e, item) => {
+    if (exportMode) return; // Disable all interactions during export
     // Only handle left-click (button 0) for dragging
     // Right-click (button 2) should be handled by onContextMenu
     if (e.button !== 0) return;
@@ -819,7 +827,7 @@ const Timeline = forwardRef(({
         }
       });
     }
-  }, [scale, lockedTracks, mediaItems, calculateTrackAssignments]);
+  }, [scale, lockedTracks, mediaItems, calculateTrackAssignments, exportMode]);
 
   // Handle mouse move for dragging with overlap prevention and track creation
   const handleMouseMove = useCallback((e) => {
@@ -1307,16 +1315,18 @@ const Timeline = forwardRef(({
 
   // Handle timeline tracks click for deselection
   const handleTracksClick = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     // Only deselect if clicking on the tracks area itself, not on an item
     // Also check if we're not currently dragging or selecting to avoid interfering with those operations
     if (!isDragging && !isSelecting && (e.target.classList.contains('timeline-tracks') || 
         e.target.classList.contains('timeline-track'))) {
       setSelectedItems(new Set());
     }
-  }, [isDragging, isSelecting]);
+  }, [isDragging, isSelecting, exportMode]);
 
   // Handle mouse wheel for smooth timeline zooming
   const handleWheel = useCallback((e) => {
+    if (exportMode) return; // Disable all interactions during export
     // Only handle wheel events that are specifically on timeline elements
     if (!e.target.closest('.timeline-container')) {
       return;
@@ -1330,10 +1340,11 @@ const Timeline = forwardRef(({
     const newScale = Math.max(2, Math.min(200, scale * zoomFactor)); // Wider zoom range
     
     setScale(newScale);
-  }, [scale]);
+  }, [scale, exportMode]);
 
   // Handle right-click context menu
   const handleContextMenu = useCallback((e, item) => {
+    if (exportMode) return; // Disable all interactions during export
     e.preventDefault();
     e.stopPropagation();
     
@@ -1354,7 +1365,7 @@ const Timeline = forwardRef(({
       item: item,
       selectedCount: selectedItems.has(item.id) ? selectedItems.size : 1
     });
-  }, [selectedItems]);
+  }, [selectedItems, exportMode]);
 
   // Close context menu
   const closeContextMenu = useCallback((e) => {
@@ -1367,6 +1378,7 @@ const Timeline = forwardRef(({
 
   // Toggle track lock for all selected items
   const toggleTrackLock = useCallback(() => {
+    if (exportMode) return; // Disable all interactions during export
     const selectedItemsList = mediaItems.filter(item => selectedItems.has(item.id));
     const allLocked = selectedItemsList.every(item => lockedTracks.has(item.id));
     
@@ -1382,25 +1394,28 @@ const Timeline = forwardRef(({
       return newSet;
     });
     closeContextMenu();
-  }, [mediaItems, selectedItems, lockedTracks, closeContextMenu]);
+  }, [mediaItems, selectedItems, lockedTracks, closeContextMenu, exportMode]);
 
   // Delete selected items
   const deleteSelectedItems = useCallback(() => {
+    if (exportMode) return; // Disable all interactions during export
     const updatedItems = mediaItems.filter(item => !selectedItems.has(item.id));
     onItemsUpdate(updatedItems);
     setSelectedItems(new Set());
     closeContextMenu();
-  }, [mediaItems, selectedItems, onItemsUpdate, closeContextMenu]);
+  }, [mediaItems, selectedItems, onItemsUpdate, closeContextMenu, exportMode]);
 
   // Copy selected items
   const copySelectedItems = useCallback(() => {
+    if (exportMode) return; // Disable all interactions during export
     const itemsToCopy = mediaItems.filter(item => selectedItems.has(item.id));
     setCopiedItems(itemsToCopy);
     closeContextMenu();
-  }, [mediaItems, selectedItems, closeContextMenu]);
+  }, [mediaItems, selectedItems, closeContextMenu, exportMode]);
 
   // Paste copied items with smart track placement
   const pasteItems = useCallback(() => {
+    if (exportMode) return; // Disable all interactions during export
     if (copiedItems.length === 0) return;
     
     const pasteTime = currentTime;
@@ -1449,10 +1464,11 @@ const Timeline = forwardRef(({
     onItemsUpdate([...mediaItems, ...finalItems]);
     setSelectedItems(new Set(finalItems.map(item => item.id)));
     closeContextMenu();
-  }, [copiedItems, currentTime, mediaItems, onItemsUpdate, closeContextMenu]);
+  }, [copiedItems, currentTime, mediaItems, onItemsUpdate, closeContextMenu, exportMode]);
 
   // Duplicate selected items with smart placement
   const duplicateSelectedItems = useCallback(() => {
+    if (exportMode) return; // Disable all interactions during export
     const itemsToDuplicate = mediaItems.filter(item => selectedItems.has(item.id));
     const newItems = itemsToDuplicate.map((item, index) => {
       // Try to place right after the original item (perfect back-to-back)
@@ -1482,7 +1498,7 @@ const Timeline = forwardRef(({
     onItemsUpdate([...mediaItems, ...newItems]);
     setSelectedItems(new Set(newItems.map(item => item.id)));
     closeContextMenu();
-  }, [mediaItems, selectedItems, onItemsUpdate, closeContextMenu]);
+  }, [mediaItems, selectedItems, onItemsUpdate, closeContextMenu, exportMode]);
 
   // Mouse event listeners
   useEffect(() => {
@@ -1594,16 +1610,18 @@ const Timeline = forwardRef(({
 
   // Debug context menu state changes
   useEffect(() => {
-    console.log('Context menu state changed:', contextMenu);
-    if (contextMenu) {
-      console.log('Context menu should be visible at:', contextMenu.x, contextMenu.y);
-    } else {
-      console.log('Context menu should be hidden');
-    }
+    // console.log('Context menu state changed:', contextMenu);
+    // if (contextMenu) {
+    //   console.log('Context menu should be visible at:', contextMenu.x, contextMenu.y);
+    // } else {
+    //   console.log('Context menu should be hidden');
+    // }
   }, [contextMenu]);
 
   // Keyboard shortcuts
   useEffect(() => {
+    if (exportMode) return; // Disable all keyboard shortcuts during export
+    
     const handleKeyDown = (e) => {
       // Check if user is typing in an input field
       const isTyping = document.activeElement && (
@@ -1655,7 +1673,7 @@ const Timeline = forwardRef(({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedItems, deleteSelectedItems, copySelectedItems, pasteItems, duplicateSelectedItems, mediaItems]);
+  }, [selectedItems, deleteSelectedItems, copySelectedItems, pasteItems, duplicateSelectedItems, mediaItems, exportMode]);
 
   return (
     <div>
@@ -1670,10 +1688,51 @@ const Timeline = forwardRef(({
           height: '300px',
           minHeight: '300px',
           maxHeight: '300px',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          position: 'relative',
+          // Add visual feedback for export mode
+          opacity: exportMode ? 0.6 : 1,
+          pointerEvents: exportMode ? 'none' : 'auto',
+          transition: 'opacity 0.3s ease'
         }}
         onWheel={handleWheel}
       >
+        {/* Export mode overlay */}
+        {exportMode && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(2px)',
+            cursor: 'not-allowed'
+          }}>
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.95)',
+              color: '#333',
+              padding: '16px 24px',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '500',
+              textAlign: 'center',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              border: '2px solid #ff6b6b'
+            }}>
+              <div style={{ fontSize: '20px', marginBottom: '8px' }}>🎬</div>
+              <div>Export in Progress</div>
+              <div style={{ fontSize: '12px', opacity: 0.8, marginTop: '4px' }}>
+                Timeline interactions are disabled
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Selection box overlay at container level */}
         {isSelecting && selectionBox && (
           <div
@@ -1704,10 +1763,11 @@ const Timeline = forwardRef(({
           <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
           
           <button 
-            onClick={onPlayPause}
+            onClick={exportMode ? undefined : onPlayPause}
+            disabled={exportMode}
             style={{
-              background: '#444',
-              color: 'white',
+              background: exportMode ? '#333' : '#444',
+              color: exportMode ? '#666' : 'white',
               border: 'none',
               width: '28px',
               height: '28px',
@@ -1717,7 +1777,7 @@ const Timeline = forwardRef(({
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '11px',
-              cursor: 'pointer',
+              cursor: exportMode ? 'not-allowed' : 'pointer',
               transition: 'none',
               flexShrink: 0,
               position: 'absolute',
@@ -1727,7 +1787,8 @@ const Timeline = forwardRef(({
               boxSizing: 'border-box',
               outline: 'none',
               padding: 0,
-              margin: 0
+              margin: 0,
+              opacity: exportMode ? 0.5 : 1
             }}
           >
             <span style={{
@@ -1744,6 +1805,18 @@ const Timeline = forwardRef(({
           </button>
           
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {exportMode && (
+              <span style={{ 
+                fontSize: '11px', 
+                color: '#ff6b6b', 
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                🎬 Exporting...
+              </span>
+            )}
             <span style={{ fontSize: '11px', color: '#999' }}>
               Selected: {selectedItems.size} | Copied: {copiedItems.length}
             </span>
@@ -1870,17 +1943,20 @@ const Timeline = forwardRef(({
                           display: 'flex',
                           alignItems: 'center',
                           padding: '0 6px',
-                          cursor: 'pointer',
+                          cursor: exportMode ? 'not-allowed' : 'pointer',
                           overflow: 'hidden',
                           fontSize: '10px',
                           color: '#fff',
                           userSelect: 'none',
                           boxShadow: selectedItems.has(item.id) ? 
                                     '0 2px 4px rgba(139, 92, 246, 0.3)' : 
-                                    '0 1px 2px rgba(0,0,0,0.2)'
+                                    '0 1px 2px rgba(0,0,0,0.2)',
+                          opacity: exportMode ? 0.5 : 1,
+                          filter: exportMode ? 'grayscale(50%)' : 'none',
+                          pointerEvents: exportMode ? 'none' : 'auto'
                         }}
-                        onMouseDown={(e) => handleItemMouseDown(e, item)}
-                        onContextMenu={(e) => handleContextMenu(e, item)}
+                        onMouseDown={exportMode ? undefined : (e) => handleItemMouseDown(e, item)}
+                        onContextMenu={exportMode ? undefined : (e) => handleContextMenu(e, item)}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span style={{ 
@@ -2002,17 +2078,20 @@ const Timeline = forwardRef(({
                         display: 'flex',
                         alignItems: 'center',
                         padding: '0 6px',
-                        cursor: 'pointer',
+                        cursor: exportMode ? 'not-allowed' : 'pointer',
                         overflow: 'hidden',
                         fontSize: '10px',
                         color: '#fff',
                         userSelect: 'none',
                         boxShadow: selectedItems.has(item.id) ? 
                                   '0 2px 4px rgba(139, 92, 246, 0.3)' : 
-                                  '0 1px 2px rgba(0,0,0,0.2)'
+                                  '0 1px 2px rgba(0,0,0,0.2)',
+                        opacity: exportMode ? 0.5 : 1,
+                        filter: exportMode ? 'grayscale(50%)' : 'none',
+                        pointerEvents: exportMode ? 'none' : 'auto'
                       }}
-                      onMouseDown={(e) => handleItemMouseDown(e, item)}
-                      onContextMenu={(e) => handleContextMenu(e, item)}
+                      onMouseDown={exportMode ? undefined : (e) => handleItemMouseDown(e, item)}
+                      onContextMenu={exportMode ? undefined : (e) => handleContextMenu(e, item)}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <span style={{ 

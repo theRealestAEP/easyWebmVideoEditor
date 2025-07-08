@@ -18,16 +18,16 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
     // Check if we need to create a new audio context
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
       try {
-        console.log('🔧 Creating new audio context (previous was', audioContextRef.current?.state || 'null', ')');
+        // console.log('🔧 Creating new audio context (previous was', audioContextRef.current?.state || 'null', ')');
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
         
         // Reset the master nodes when creating new context
         masterGainNode.current = null;
         masterAnalyser.current = null;
         
-        console.log('✅ New audio context created, state:', audioContextRef.current.state);
+        // console.log('✅ New audio context created, state:', audioContextRef.current.state);
       } catch (error) {
-        console.warn('❌ Web Audio API not supported:', error);
+        // console.warn('❌ Web Audio API not supported:', error);
         setIsSupported(false);
         return null;
       }
@@ -39,15 +39,15 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
   const initializeMasterAnalyser = () => {
     const audioContext = getAudioContext();
     if (!audioContext) {
-      console.error('❌ Cannot initialize master analyser: no audio context');
+    //   console.error('❌ Cannot initialize master analyser: no audio context');
       return null;
     }
     
-    console.log('🔧 initializeMasterAnalyser called, audioContext state:', audioContext.state);
+    // console.log('🔧 initializeMasterAnalyser called, audioContext state:', audioContext.state);
     
     if (!masterAnalyser.current) {
       try {
-        console.log('🔧 Creating master gain and analyser nodes...');
+        // console.log('🔧 Creating master gain and analyser nodes...');
         
         // Create master gain node and analyser
         masterGainNode.current = audioContext.createGain();
@@ -64,21 +64,21 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
         masterGainNode.current.connect(masterAnalyser.current);
         masterAnalyser.current.connect(audioContext.destination);
         
-        console.log('✅ Master analyser initialized successfully');
-        console.log('✅ Audio chain: masterGainNode → masterAnalyser → destination');
-        console.log('✅ Analyser config:', {
-          fftSize: masterAnalyser.current.fftSize,
-          frequencyBinCount: masterAnalyser.current.frequencyBinCount,
-          minDecibels: masterAnalyser.current.minDecibels,
-          maxDecibels: masterAnalyser.current.maxDecibels
-        });
+        // console.log('✅ Master analyser initialized successfully');
+        // console.log('✅ Audio chain: masterGainNode → masterAnalyser → destination');
+        // console.log('✅ Analyser config:', {
+        //   fftSize: masterAnalyser.current.fftSize,
+        //   frequencyBinCount: masterAnalyser.current.frequencyBinCount,
+        //   minDecibels: masterAnalyser.current.minDecibels,
+        //   maxDecibels: masterAnalyser.current.maxDecibels
+        // });
         
       } catch (error) {
         console.error('❌ Failed to create master analyser:', error);
         return null;
       }
     } else {
-      console.log('✅ Master analyser already exists');
+    //   console.log('✅ Master analyser already exists');
     }
     
     return masterAnalyser.current;
@@ -90,28 +90,28 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
     
     // Only run if we have audio elements to connect
     if (audioElements.size === 0) {
-      console.log('🔍 VolumeBar: No audio elements to connect yet');
+    //   console.log('🔍 VolumeBar: No audio elements to connect yet');
       return;
     }
     
-    console.log('🔍 VolumeBar: Initializing analysers...');
-    console.log('🔍 VolumeBar: audioElements:', audioElements);
-    console.log('🔍 VolumeBar: audioElements.size:', audioElements.size);
-    console.log('🔍 VolumeBar: isPlaying:', isPlaying);
+    // console.log('🔍 VolumeBar: Initializing analysers...');
+    // console.log('🔍 VolumeBar: audioElements:', audioElements);
+    // console.log('🔍 VolumeBar: audioElements.size:', audioElements.size);
+    // console.log('🔍 VolumeBar: isPlaying:', isPlaying);
     
     const initializeAnalysers = async () => {
       const audioContext = getAudioContext();
       if (!audioContext) return;
       
-      console.log('🔍 VolumeBar: Audio context state:', audioContext.state);
+    //   console.log('🔍 VolumeBar: Audio context state:', audioContext.state);
       
       // Resume audio context if suspended (required by browser policy)
       if (audioContext.state === 'suspended') {
         try {
           await audioContext.resume();
-          console.log('✅ Audio context resumed, new state:', audioContext.state);
+        //   console.log('✅ Audio context resumed, new state:', audioContext.state);
         } catch (error) {
-          console.warn('❌ Could not resume audio context:', error);
+        //   console.warn('❌ Could not resume audio context:', error);
           setIsSupported(false);
           return;
         }
@@ -120,7 +120,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       // Initialize master analyser FIRST
       const masterAnalyserNode = initializeMasterAnalyser();
       if (!masterAnalyserNode) {
-        console.warn('❌ Failed to initialize master analyser');
+        // console.warn('❌ Failed to initialize master analyser');
         return;
       }
       
@@ -128,24 +128,24 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       let alreadyConnectedCount = 0;
       
       // Log all audio elements with detailed state
-      console.log('🔍 VolumeBar: Processing audio elements...');
+    //   console.log('🔍 VolumeBar: Processing audio elements...');
       for (const [id, audio] of audioElements.entries()) {
-        console.log('🔍 VolumeBar: Audio element details:', {
-          id,
-          paused: audio.paused,
-          currentTime: audio.currentTime,
-          duration: audio.duration,
-          src: audio.src,
-          readyState: audio.readyState,
-          volume: audio.volume,
-          muted: audio.muted,
-          networkState: audio.networkState,
-          crossOrigin: audio.crossOrigin
-        });
+        // console.log('🔍 VolumeBar: Audio element details:', {
+        //   id,
+        //   paused: audio.paused,
+        //   currentTime: audio.currentTime,
+        //   duration: audio.duration,
+        //   src: audio.src,
+        //   readyState: audio.readyState,
+        //   volume: audio.volume,
+        //   muted: audio.muted,
+        //   networkState: audio.networkState,
+        //   crossOrigin: audio.crossOrigin
+        // });
         
         if (!analyserNodes.current.has(id)) {
           try {
-            console.log(`🔍 Attempting to connect NEW audio element: ${id}`);
+            // console.log(`🔍 Attempting to connect NEW audio element: ${id}`);
             
             // Important: Create media element source (can only be done once per element)
             // This will disconnect the audio from the normal browser output path
@@ -155,8 +155,8 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
             // Connect to master gain node which routes to both analyser and speakers
             source.connect(masterGainNode.current);
             
-            console.log(`🔗 Connected NEW audio ${id}: source → masterGainNode → masterAnalyser → destination`);
-            console.log(`🔊 This audio will now play through Web Audio API only`);
+            // console.log(`🔗 Connected NEW audio ${id}: source → masterGainNode → masterAnalyser → destination`);
+            // console.log(`🔊 This audio will now play through Web Audio API only`);
             
             // Store the source for cleanup
             analyserNodes.current.set(id, {
@@ -167,13 +167,13 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
             });
             
             connectedCount++;
-            console.log(`✅ Connected NEW audio element: ${id}`);
+            // console.log(`✅ Connected NEW audio element: ${id}`);
             
           } catch (error) {
-            console.warn(`❌ Failed to connect audio element ${id}:`, error);
+            // console.warn(`❌ Failed to connect audio element ${id}:`, error);
             
             if (error.name === 'InvalidStateError') {
-              console.warn('Audio element already connected - this is expected behavior');
+            //   console.warn('Audio element already connected - this is expected behavior');
               // Mark as connected even if we can't create a new source
               analyserNodes.current.set(id, {
                 source: null,
@@ -187,7 +187,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
             }
           }
         } else {
-          console.log(`🔗 Audio element ${id} already has analyser node`);
+        //   console.log(`🔗 Audio element ${id} already has analyser node`);
           alreadyConnectedCount++;
         }
       }
@@ -202,7 +202,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
             }
             cleanedUpCount++;
           } catch (error) {
-            console.warn('Error disconnecting audio source:', error);
+            // console.warn('Error disconnecting audio source:', error);
           }
           analyserNodes.current.delete(id);
         }
@@ -210,21 +210,21 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       
       const debugMsg = `Connected: ${connectedCount}/${audioElements.size} | Existing: ${alreadyConnectedCount} | Cleaned: ${cleanedUpCount}`;
       setDebugInfo(debugMsg);
-      console.log(`📊 Audio analysis setup complete: ${debugMsg}`);
+    //   console.log(`📊 Audio analysis setup complete: ${debugMsg}`);
       
       // Log the state of each connected audio element
-      console.log('🔍 VolumeBar: All connected audio elements:');
+    //   console.log('🔍 VolumeBar: All connected audio elements:');
       for (const [id, analyserData] of analyserNodes.current.entries()) {
         const audio = analyserData.audioElement;
-        console.log(`  - ${id}:`, {
-          connected: analyserData.connected,
-          alreadyConnected: analyserData.alreadyConnected,
-          paused: audio.paused,
-          currentTime: audio.currentTime?.toFixed(2),
-          volume: audio.volume,
-          muted: audio.muted,
-          connectedAt: analyserData.connectedAt ? new Date(analyserData.connectedAt).toLocaleTimeString() : 'N/A'
-        });
+        // console.log(`  - ${id}:`, {
+        //   connected: analyserData.connected,
+        //   alreadyConnected: analyserData.alreadyConnected,
+        //   paused: audio.paused,
+        //   currentTime: audio.currentTime?.toFixed(2),
+        //   volume: audio.volume,
+        //   muted: audio.muted,
+        //   connectedAt: analyserData.connectedAt ? new Date(analyserData.connectedAt).toLocaleTimeString() : 'N/A'
+        // });
       }
     };
     
@@ -233,11 +233,11 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
   
   // Real-time audio level monitoring with better timeline audio detection
   useEffect(() => {
-    console.log('🔍 VolumeBar: Level monitoring effect triggered');
-    console.log('🔍 VolumeBar: isPlaying:', isPlaying);
-    console.log('🔍 VolumeBar: isSupported:', isSupported);
-    console.log('🔍 VolumeBar: masterAnalyser.current:', !!masterAnalyser.current);
-    console.log('🔍 VolumeBar: audioElements.size:', audioElements.size);
+    // console.log('🔍 VolumeBar: Level monitoring effect triggered');
+    // console.log('🔍 VolumeBar: isPlaying:', isPlaying);
+    // console.log('🔍 VolumeBar: isSupported:', isSupported);
+    // console.log('🔍 VolumeBar: masterAnalyser.current:', !!masterAnalyser.current);
+    // console.log('🔍 VolumeBar: audioElements.size:', audioElements.size);
     
     // Check if any audio elements are actually playing with detailed logging
     let actuallyPlaying = false;
@@ -259,27 +259,27 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       }
     }
     
-    console.log('🔍 VolumeBar: Timeline audio detailed state:', playingDetails);
-    console.log('🔍 VolumeBar: actuallyPlaying:', actuallyPlaying);
+    // console.log('🔍 VolumeBar: Timeline audio detailed state:', playingDetails);
+    // console.log('🔍 VolumeBar: actuallyPlaying:', actuallyPlaying);
     
     // TRY TO INITIALIZE MASTER ANALYSER if we don't have one but should monitor
     if ((isPlaying || actuallyPlaying) && isSupported && !masterAnalyser.current) {
-      console.log('🔧 Attempting to initialize master analyser for monitoring...');
+    //   console.log('🔧 Attempting to initialize master analyser for monitoring...');
       const analyser = initializeMasterAnalyser();
       if (analyser) {
-        console.log('✅ Master analyser initialized for monitoring');
+        // console.log('✅ Master analyser initialized for monitoring');
       } else {
-        console.error('❌ Failed to initialize master analyser for monitoring');
+        // console.error('❌ Failed to initialize master analyser for monitoring');
       }
     }
     
     // Re-calculate shouldMonitor after potential initialization
     const finalShouldMonitor = (isPlaying || actuallyPlaying) && isSupported && masterAnalyser.current;
     
-    console.log('🔍 VolumeBar: Final shouldMonitor after init attempt:', finalShouldMonitor);
+    // console.log('🔍 VolumeBar: Final shouldMonitor after init attempt:', finalShouldMonitor);
     
     if (!finalShouldMonitor) {
-      console.log('❌ VolumeBar: Not starting level monitoring - conditions not met');
+    //   console.log('❌ VolumeBar: Not starting level monitoring - conditions not met');
       
       // Reset levels when not playing
       setLevels({ left: -60, right: -60 });
@@ -290,8 +290,8 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       return;
     }
     
-    console.log('✅ VolumeBar: Starting level monitoring...');
-    console.log('✅ VolumeBar: Monitoring reasons - isPlaying:', isPlaying, 'actuallyPlaying:', actuallyPlaying);
+    // console.log('✅ VolumeBar: Starting level monitoring...');
+    // console.log('✅ VolumeBar: Monitoring reasons - isPlaying:', isPlaying, 'actuallyPlaying:', actuallyPlaying);
     
     const analyser = masterAnalyser.current;
     const bufferLength = analyser.frequencyBinCount;
@@ -302,7 +302,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
     
     const updateLevels = () => {
       if (!analyser) {
-        console.warn('❌ No analyser in updateLevels');
+        // console.warn('❌ No analyser in updateLevels');
         return;
       }
       
@@ -340,23 +340,23 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
             });
           }
           
-          console.log('🔍 VolumeBar: Audio analysis frame:', {
-            frameCount,
-            rms: rms.toFixed(4),
-            db: db.toFixed(1),
-            leftDB: leftDB.toFixed(1),
-            rightDB: rightDB.toFixed(1),
-            timelineAudioInfo,
-            timeDataSample: Array.from(timeDataArray.slice(0, 10)),
-            freqDataSample: Array.from(dataArray.slice(0, 10)),
-            analyserConnected: !!analyser,
-            analyserContext: analyser.context?.state
-          });
+        //   console.log('🔍 VolumeBar: Audio analysis frame:', {
+        //     frameCount,
+        //     rms: rms.toFixed(4),
+        //     db: db.toFixed(1),
+        //     leftDB: leftDB.toFixed(1),
+        //     rightDB: rightDB.toFixed(1),
+        //     timelineAudioInfo,
+        //     timeDataSample: Array.from(timeDataArray.slice(0, 10)),
+        //     freqDataSample: Array.from(dataArray.slice(0, 10)),
+        //     analyserConnected: !!analyser,
+        //     analyserContext: analyser.context?.state
+        //   });
           
           // Check if we're getting any non-zero data
           const hasTimeData = timeDataArray.some(val => val !== 128); // 128 is silence in time domain
           const hasFreqData = dataArray.some(val => val > 0);
-          console.log('🔍 VolumeBar: Data check - hasTimeData:', hasTimeData, 'hasFreqData:', hasFreqData);
+        //   console.log('🔍 VolumeBar: Data check - hasTimeData:', hasTimeData, 'hasFreqData:', hasFreqData);
           
           // If we have timeline audio playing but no data, that's the problem
           const timelineAudioPlaying = timelineAudioInfo.some(info => !info.paused && parseFloat(info.currentTime) > 0);
@@ -414,7 +414,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
         
         // Log audio element states periodically
         if (frameCount % 120 === 0) {
-          console.log('🔍 VolumeBar: Audio element states:', audioElementStates);
+        //   console.log('🔍 VolumeBar: Audio element states:', audioElementStates);
         }
         
       } catch (error) {
@@ -611,7 +611,7 @@ const VolumeBar = ({ audioElements, isPlaying }) => {
       
       // DON'T close the audio context - let the browser manage it
       // This prevents the "closed" state issue
-      console.log('🧹 VolumeBar cleanup complete (audio context left open)');
+    //   console.log('🧹 VolumeBar cleanup complete (audio context left open)');
     };
   }, []);
   
