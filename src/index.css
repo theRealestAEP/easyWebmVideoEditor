@@ -675,4 +675,72 @@ body {
 .modal-button.confirm:hover {
   background: #b91c1c !important;
   transform: none !important;
+}
+
+/* About Modal Specific Styles */
+.about-modal {
+  max-width: 500px;
+  background: #252525;
+  border: 1px solid #404040;
+}
+
+.about-modal h3 {
+  color: #e5e5e5;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+.about-content p {
+  color: #b8b8b8;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.about-content p:last-child {
+  margin-bottom: 24px;
+}
+
+.about-content strong {
+  color: #d1d1d1;
+  font-weight: 600;
+}
+
+.about-content ul {
+  margin: 12px 0 16px 20px;
+  color: #b8b8b8;
+}
+
+.about-content li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.about-content a {
+  color: #a78bfa;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.about-content a:hover {
+  color: #c4b5fd;
+  text-decoration: underline;
+}
+
+.about-button {
+  background: transparent !important;
+  border: none !important;
+  color: #a0a0a0 !important;
+  font-size: 16px !important;
+  padding: 4px 8px !important;
+  cursor: pointer !important;
+  transition: color 0.2s ease !important;
+  border-radius: 4px !important;
+}
+
+.about-button:hover {
+  color: #d1d1d1 !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  transform: none !important;
 } 

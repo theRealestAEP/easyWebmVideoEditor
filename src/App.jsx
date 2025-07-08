@@ -1293,6 +1293,8 @@ function App() {
             canvasWidth={settings.canvasWidth}
             canvasHeight={settings.canvasHeight}
             exportMode={isExporting}
+            onItemsUpdate={handleTimelineUpdate}
+            restoreFileForItem={restoreFileForItem}
           />
           
           {/* Timeline and Volume Bar Container */}

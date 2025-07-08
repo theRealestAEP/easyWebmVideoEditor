@@ -11,7 +11,9 @@ const VideoCanvas = ({
   onItemUpdate,
   canvasWidth = 1920,
   canvasHeight = 1080,
-  exportMode = false
+  exportMode = false,
+  onItemsUpdate, // Add this prop for adding new items to timeline
+  restoreFileForItem // Add this prop for restoring File objects
 }) => {
   const canvasRef = useRef();
   const fabricCanvas = useRef();
@@ -42,6 +44,93 @@ const VideoCanvas = ({
   const previousCanvasDimensions = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
   const rescalingQueue = useRef(new Map()); // Track items pending rescaling
   const rescalingTimeouts = useRef(new Map()); // Debounce rescaling triggers
+
+  // Add drag over state for visual feedback
+  const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
+
+  // Handle canvas drop events
+  const handleCanvasDrop = useCallback(async (e) => {
+    e.preventDefault();
+    setIsDragOverCanvas(false);
+    
+    // Check if this is internal media drag from source panel
+    const droppedData = e.dataTransfer.getData('text/plain');
+    if (!droppedData) return;
+    
+    try {
+      const sourceItem = JSON.parse(droppedData);
+      console.log('Dropped source item onto canvas:', sourceItem);
+      
+      // Get the canvas container element for position calculation
+      const canvasContainer = e.currentTarget;
+      const rect = canvasContainer.getBoundingClientRect();
+      
+      // Calculate drop position relative to the displayed canvas
+      const dropX = e.clientX - rect.left;
+      const dropY = e.clientY - rect.top;
+      
+      // Convert display coordinates to actual canvas coordinates
+      // The canvas is displayed at displaySize but actual size is CANVAS_WIDTH x CANVAS_HEIGHT
+      const actualCanvasX = (dropX / scale);
+      const actualCanvasY = (dropY / scale);
+      
+      // Clamp to canvas bounds
+      const clampedX = Math.max(0, Math.min(actualCanvasX, CANVAS_WIDTH));
+      const clampedY = Math.max(0, Math.min(actualCanvasY, CANVAS_HEIGHT));
+      
+      console.log('Canvas drop coordinates:', {
+        displayDrop: { x: dropX, y: dropY },
+        actualCanvas: { x: actualCanvasX, y: actualCanvasY },
+        clamped: { x: clampedX, y: clampedY },
+        scale: scale,
+        displaySize: displaySize,
+        canvasSize: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }
+      });
+      
+      // Create timeline item from source item
+      const timelineItem = {
+        ...sourceItem,
+        id: Date.now() + Math.random(), // New ID for timeline
+        sourceId: sourceItem.id, // Keep reference to original source item for File restoration
+        startTime: Math.round(currentTime * 10) / 10, // Place at current timeline position, snapped to 0.1s grid
+        x: clampedX, // Use actual canvas coordinates
+        y: clampedY,
+        // Set appropriate default sizes based on media type
+        width: sourceItem.type === 'video' || sourceItem.subtype === 'gif' || sourceItem.subtype === 'sticker' ? 320 : 200,
+        height: sourceItem.type === 'video' || sourceItem.subtype === 'gif' || sourceItem.subtype === 'sticker' ? 180 : 150,
+        rotation: 0,
+        opacity: 1
+      };
+      
+      // Restore File object if this came from uploaded media and we have a restore function
+      const restoredItem = restoreFileForItem ? restoreFileForItem(timelineItem) : timelineItem;
+      
+      console.log('Creating timeline item from canvas drop:', restoredItem);
+      
+      // Add to timeline if we have the callback
+      if (onItemsUpdate) {
+        const updatedItems = [...mediaItems, restoredItem];
+        onItemsUpdate(updatedItems);
+      }
+      
+    } catch (error) {
+      console.error('Error handling canvas drop:', error);
+    }
+  }, [scale, displaySize, CANVAS_WIDTH, CANVAS_HEIGHT, currentTime, mediaItems, onItemsUpdate, restoreFileForItem]);
+
+  const handleCanvasDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOverCanvas(true);
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((e) => {
+    e.preventDefault();
+    // Only hide drag overlay if actually leaving the canvas container
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragOverCanvas(false);
+    }
+  }, []);
 
   // Detect rapid updates (drag operations)
   useEffect(() => {
@@ -888,7 +977,11 @@ const VideoCanvas = ({
         borderRadius: '8px',
         position: 'relative',
         overflow: 'hidden'
-      }}>
+      }}
+        onDrop={handleCanvasDrop}
+        onDragOver={handleCanvasDragOver}
+        onDragLeave={handleCanvasDragLeave}
+      >
         <canvas
           ref={canvasRef}
           className="video-canvas"
@@ -900,6 +993,40 @@ const VideoCanvas = ({
             height: displaySize.height,
           }}
         />
+        
+        {/* Canvas drag overlay */}
+        {isDragOverCanvas && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(139, 92, 246, 0.2)',
+            border: '2px dashed #8b5cf6',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 100
+          }}>
+            <div style={{
+              background: 'rgba(139, 92, 246, 0.9)',
+              color: '#fff',
+              padding: '12px 20px',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '500',
+              textAlign: 'center'
+            }}>
+              Drop here to place on canvas
+              <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px' }}>
+                Media will appear at current time ({currentTime.toFixed(1)}s)
+              </div>
+            </div>
+          </div>
+        )}
         
         <div style={{
           position: 'absolute',
@@ -996,9 +1123,10 @@ const VideoCanvas = ({
           pointerEvents: 'none',
           textAlign: 'center'
         }}>
-          Drop media files here or use the "Add Media" button<br/>
+          Drop media files here or drag from source panel<br/>
           <span style={{ fontSize: '14px', opacity: 0.7 }}>
-            Supports: MP4, WebM, GIF, WebP, PNG, JPG
+            Supports: MP4, WebM, GIF, WebP, PNG, JPG<br/>
+            Drop on canvas to position precisely
           </span>
         </div>
       )}

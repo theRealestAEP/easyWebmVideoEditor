@@ -20,6 +20,7 @@ const Toolbar = ({
 }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const settingsRef = useRef();
 
   // Close settings dropdown when clicking outside
@@ -60,6 +61,14 @@ const Toolbar = ({
 
   const handleCancelClear = () => {
     setShowClearModal(false);
+  };
+
+  const handleAbout = () => {
+    setShowAboutModal(true);
+  };
+
+  const handleCloseAbout = () => {
+    setShowAboutModal(false);
   };
 
   return (
@@ -108,6 +117,13 @@ const Toolbar = ({
       
       <div className="toolbar-center">
         <h1>EZ Web Video Editor</h1>
+        <button 
+          onClick={handleAbout} 
+          className="about-button"
+          title="About this tool"
+        >
+          ℹ️
+        </button>
       </div>
       
       <div className="toolbar-right">
@@ -208,6 +224,40 @@ const Toolbar = ({
               </button>
               <button onClick={handleConfirmClear} className="modal-button confirm">
                 Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* About Modal */}
+      {showAboutModal && (
+        <div className="modal-overlay">
+          <div className="modal-content about-modal">
+            <h3>About EZ Web Video Editor</h3>
+            <div className="about-content">
+              <p>
+                EZ Web Video Editor is a web-based video editing tool specifically designed to create and export videos in <strong>transparent WebM format</strong>.
+              </p>
+              <p>
+                <strong>Key Features:</strong>
+              </p>
+              <ul>
+                <li>Everything runs and is stored locally on your device - no data leaves your browser</li>
+                <li>Export videos with transparency support (WebM format)</li>
+                <li>Perfect for creating short memes and video assets</li>
+                <li>Simple drag-and-drop interface for quick editing</li>
+              </ul>
+              <p>
+                This tool was designed to create short memes and assets for <a href="https://tangia.co" target="_blank" rel="noopener noreferrer"><strong>Tangia.co</strong></a> - the ultimate platform for streamer interactions and engagement.
+              </p>
+              <p>
+                <strong>Need help or found an issue?</strong> Send an email to <a href="mailto:alex@tangia.co"><strong>alex@tangia.co</strong></a>
+              </p>
+            </div>
+            <div className="modal-buttons">
+              <button onClick={handleCloseAbout} className="modal-button confirm">
+                Got it!
               </button>
             </div>
           </div>
