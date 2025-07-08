@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 
 // Small tolerance for floating-point precision in collision detection
 // This allows items to be placed truly back-to-back with 0 gap
@@ -7,7 +7,7 @@ const COLLISION_TOLERANCE = 0.05; // 50ms tolerance to account for 0.1s snapping
 // Snapping distance for intelligent item-to-item snapping
 const SNAP_DISTANCE = 0.2; // 200ms - snap to adjacent items when within this distance
 
-const Timeline = ({ 
+const Timeline = forwardRef(({ 
   mediaItems, 
   currentTime, 
   duration, 
@@ -18,7 +18,7 @@ const Timeline = ({
   onDurationChange,
   playbackFrameRate = 15, // Default to 15fps if not provided
   restoreFileForItem // Function to restore File objects for uploaded media
-}) => {
+}, ref) => {
   const timelineRef = useRef();
   const [isDragging, setIsDragging] = useState(false);
   const [dragItem, setDragItem] = useState(null);
@@ -295,6 +295,14 @@ const Timeline = ({
 
   // Get track assignments for current media items
   const trackAssignments = calculateTrackAssignments(mediaItems);
+  
+  // Expose audioElements via ref
+  useImperativeHandle(ref, () => ({
+    getAudioElements: () => audioElements.current
+  }), []);
+
+  // Debug logging
+  console.log('Timeline rendering - trackAssignments:', trackAssignments, 'mediaItems:', mediaItems.length);
 
   // Playback timer
   useEffect(() => {
@@ -317,28 +325,45 @@ const Timeline = ({
 
   // Audio playback management
   useEffect(() => {
+    // Include both dedicated audio items AND video items (which may have audio tracks)
     const audioItems = mediaItems.filter(item => item.type === 'audio');
+    const videoItems = mediaItems.filter(item => item.type === 'video');
+    const allAudioSources = [...audioItems, ...videoItems];
     
-    // Create audio elements for new audio items
-    audioItems.forEach(item => {
+    console.log('Timeline audio management:', {
+      audioItems: audioItems.length,
+      videoItems: videoItems.length,
+      totalAudioSources: allAudioSources.length
+    });
+    
+    // Create audio elements for new audio sources (both audio files and video files)
+    allAudioSources.forEach(item => {
       if (!audioElements.current.has(item.id)) {
         const audio = new Audio(item.url);
         audio.preload = 'auto';
+        audio.crossOrigin = 'anonymous'; // Enable CORS for Web Audio API
+        
+        // For video files, we're only interested in the audio track
+        if (item.type === 'video') {
+          console.log('Creating audio element for video file audio track:', item.name);
+        }
+        
         audioElements.current.set(item.id, audio);
       }
     });
 
     // Remove audio elements for deleted items
-    const currentAudioIds = new Set(audioItems.map(item => item.id));
+    const currentAudioIds = new Set(allAudioSources.map(item => item.id));
     for (const [id, audio] of audioElements.current.entries()) {
       if (!currentAudioIds.has(id)) {
         audio.pause();
         audioElements.current.delete(id);
+        console.log('Removed audio element for deleted item:', id);
       }
     }
 
     // Update audio playback based on timeline state
-    audioItems.forEach(item => {
+    allAudioSources.forEach(item => {
       const audio = audioElements.current.get(item.id);
       if (!audio) return;
 
@@ -356,10 +381,14 @@ const Timeline = ({
         }
         
         if (audio.paused) {
-          audio.play().catch(console.warn);
+          console.log('Starting audio playback for:', item.name, 'type:', item.type, 'at time:', audioTime.toFixed(2));
+          audio.play().catch(error => {
+            console.warn('Audio play failed for', item.name, ':', error);
+          });
         }
       } else {
         if (!audio.paused) {
+          console.log('Pausing audio for:', item.name, 'type:', item.type);
           audio.pause();
         }
       }
@@ -1552,12 +1581,12 @@ const Timeline = ({
       style={{
         border: '1px solid #333',
         borderTop: 'none',
-        contain: 'layout style paint size', // Added 'size' containment to prevent container resize
-        isolation: 'isolate', // Create isolated stacking context
-        height: '300px', // Fixed height to prevent container growth
+        contain: 'layout style paint size',
+        isolation: 'isolate',
+        height: '300px',
         minHeight: '300px',
         maxHeight: '300px',
-        overflow: 'hidden' // Prevent internal content from expanding container
+        overflow: 'hidden'
       }}
       onWheel={handleWheel}
     >
@@ -1569,11 +1598,11 @@ const Timeline = ({
         alignItems: 'center',
         justifyContent: 'space-between',
         height: '40px',
-        position: 'relative' // Add relative positioning for absolute button
+        position: 'relative'
       }}>
         <span style={{ fontSize: '13px', fontWeight: '500', color: '#fff' }}>Timeline</span>
         
-          <button 
+        <button 
           onClick={onPlayPause}
           style={{
             background: '#444',
@@ -1581,23 +1610,23 @@ const Timeline = ({
             border: 'none',
             width: '28px',
             height: '28px',
-            minWidth: '28px', // Prevent button from shrinking
-            borderRadius: '50%', // Force circular shape
+            minWidth: '28px',
+            borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '11px',
             cursor: 'pointer',
-            transition: 'none', // Remove transition to prevent any visual changes
-            flexShrink: 0, // Prevent button from shrinking in flex container
-            position: 'absolute', // Change to absolute positioning
-            left: '50%', // Center horizontally
-            top: '50%', // Center vertically
-            transform: 'translate(-50%, -50%)', // Perfect centering
-            boxSizing: 'border-box', // Ensure proper box model
-            outline: 'none', // Remove focus outline
-            padding: 0, // Remove any default padding
-            margin: 0 // Remove any default margin
+            transition: 'none',
+            flexShrink: 0,
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            boxSizing: 'border-box',
+            outline: 'none',
+            padding: 0,
+            margin: 0
           }}
         >
           <span style={{
@@ -1606,7 +1635,7 @@ const Timeline = ({
             justifyContent: 'center',
             width: '100%',
             height: '100%',
-            fontFamily: 'monospace', // Use monospace for consistent character width
+            fontFamily: 'monospace',
             fontWeight: 'bold'
           }}>
             {isPlaying ? '||' : '▶'}
@@ -1654,9 +1683,8 @@ const Timeline = ({
             zIndex: 15
           }}
         >
-          {/* Playhead handle */}
-        <div style={{
-          position: 'absolute',
+          <div style={{
+            position: 'absolute',
             top: '-1px',
             left: '-3px',
             width: '8px',
@@ -1687,273 +1715,285 @@ const Timeline = ({
           minWidth: `${Math.max(800, duration * scale + 100)}px`,
           width: '100%'
         }}>
-        {/* Selection box overlay */}
-        {isSelecting && selectionBox && (
-          <div
-            style={{
-          position: 'absolute',
-              left: `${selectionBox.x}px`,
-              top: `${selectionBox.y}px`,
-              width: `${selectionBox.width}px`,
-              height: `${selectionBox.height}px`,
-              background: 'rgba(139, 92, 246, 0.2)',
-              border: '1px solid #8b5cf6',
-          pointerEvents: 'none',
-              zIndex: 20
-            }}
-          />
-        )}
-        
-        {/* Video Tracks - Always show at least one */}
-        {Math.max(1, trackAssignments.videoTracks.length) && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
-          const track = trackAssignments.videoTracks[trackIndex] || [];
-          return (
-          <div
-            key={`video-${trackIndex}`}
-            className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
-            style={{
+          {/* Selection box overlay */}
+          {isSelecting && selectionBox && (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${selectionBox.x}px`,
+                top: `${selectionBox.y}px`,
+                width: `${selectionBox.width}px`,
+                height: `${selectionBox.height}px`,
+                background: 'rgba(139, 92, 246, 0.2)',
+                border: '1px solid #8b5cf6',
+                pointerEvents: 'none',
+                zIndex: 20
+              }}
+            />
+          )}
+          
+          {/* Video Tracks - Always show at least one */}
+          {Math.max(1, trackAssignments.videoTracks.length) > 0 && Array.from({ length: Math.max(1, trackAssignments.videoTracks.length) }, (_, trackIndex) => {
+            const track = trackAssignments.videoTracks[trackIndex] || [];
+            return (
+              <div
+                key={`video-${trackIndex}`}
+                className={`timeline-track ${lockedTracks.has(`video-${trackIndex}`) ? 'locked' : ''}`}
+                style={{
+                  height: '50px',
+                  borderBottom: '1px solid #2a2a2a',
+                  position: 'relative',
+                  background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                             'rgba(139, 92, 246, 0.1)' : 
+                             '#1e1e1e'
+                }}
+              >
+                {/* Track label */}
+                <div style={{
+                  position: 'absolute',
+                  left: '8px',
+                  top: '6px',
+                  fontSize: '10px',
+                  color: '#888',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                  fontWeight: '500'
+                }}>
+                  🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
+                </div>
+
+                {/* Track items */}
+                {track && track.map && track.map(item => {
+                  const left = item.startTime * scale;
+                  const width = item.duration * scale;
+                  
+                  return (
+                    <div
+                      key={item.id}
+                      className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                      style={{
+                        position: 'absolute',
+                        left: `${left}px`,
+                        top: '18px',
+                        width: `${width}px`,
+                        height: '28px',
+                        background: selectedItems.has(item.id) ? 
+                                   '#8b5cf6' : 
+                                   getItemColor(item),
+                        border: selectedItems.has(item.id) ? 
+                               '2px solid #a855f7' : 
+                               '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0 6px',
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        fontSize: '10px',
+                        color: '#fff',
+                        userSelect: 'none',
+                        boxShadow: selectedItems.has(item.id) ? 
+                                  '0 2px 4px rgba(139, 92, 246, 0.3)' : 
+                                  '0 1px 2px rgba(0,0,0,0.2)'
+                      }}
+                      onMouseDown={(e) => handleItemMouseDown(e, item)}
+                      onContextMenu={(e) => handleContextMenu(e, item)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span style={{ 
+                        whiteSpace: 'nowrap', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis',
+                        fontWeight: '500'
+                      }}>
+                        {item.name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* Video Track Drop Zone - show immediately after video tracks when dragging video items */}
+          {isDragging && dragItem && dragItem.type !== 'audio' && (
+            <div
+              style={{
+                height: '50px',
+                borderBottom: '2px dashed #444',
+                position: 'relative',
+                background: dragTargetTrack?.isNewTrack ? 
+                           'rgba(139, 92, 246, 0.1)' : 
+                           '#1e1e1e',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#666',
+                fontSize: '11px',
+                fontStyle: 'italic',
+                fontWeight: '500'
+              }}
+            >
+              {dragTargetTrack?.isNewTrack ? (
+                <span style={{ color: '#8b5cf6' }}>
+                  ✨ Drop here to create new video track
+                </span>
+              ) : (
+                <span>
+                  Drop here to create new video track
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Visual Gap Between Video and Audio Tracks */}
+          {trackAssignments.audioTracks.length > 0 && (
+            <div style={{
+              height: '20px',
+              background: '#0a0a0a',
+              borderTop: '1px solid #333',
+              borderBottom: '1px solid #333',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '9px',
+              color: '#555',
+              fontWeight: '500',
+              width: '100%',
+              minWidth: `${duration * scale}px`
+            }}>
+              AUDIO
+            </div>
+          )}
+
+          {/* Audio Tracks - Rendered at the bottom after gap */}
+          {trackAssignments.audioTracks && trackAssignments.audioTracks.map && trackAssignments.audioTracks.map((track, trackIndex) => (
+            <div
+              key={`audio-${trackIndex}`}
+              className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
+              style={{
                 height: '50px',
                 borderBottom: '1px solid #2a2a2a',
-              position: 'relative',
-                background: dragTargetTrack?.index === trackIndex && dragTargetTrack?.canPlaceHere ? 
+                position: 'relative',
+                background: dragTargetTrack?.index === (trackAssignments.videoTracks.length + trackIndex) && dragTargetTrack?.canPlaceHere ? 
                            'rgba(139, 92, 246, 0.1)' : 
                            '#1e1e1e'
-            }}
-          >
-            {/* Track label */}
-            <div style={{
-              position: 'absolute',
+              }}
+            >
+              {/* Track label */}
+              <div style={{
+                position: 'absolute',
                 left: '8px',
                 top: '6px',
                 fontSize: '10px',
                 color: '#888',
-              pointerEvents: 'none',
+                pointerEvents: 'none',
                 zIndex: 1,
                 fontWeight: '500'
-            }}>
-                🎬 Video {trackIndex + 1} {lockedTracks.has(`video-${trackIndex}`) && '🔒'}
-            </div>
+              }}>
+                🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
+              </div>
 
-            {/* Track items */}
-            {track.map(item => {
-              const left = item.startTime * scale;
-              const width = item.duration * scale;
-              
-              return (
-                <div
-                  key={item.id}
-                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                  style={{
-                    position: 'absolute',
-                    left: `${left}px`,
+              {/* Track items */}
+              {track && track.map && track.map(item => {
+                const left = item.startTime * scale;
+                const width = item.duration * scale;
+                
+                return (
+                  <div
+                    key={item.id}
+                    className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
+                    style={{
+                      position: 'absolute',
+                      left: `${left}px`,
                       top: '18px',
-                    width: `${width}px`,
+                      width: `${width}px`,
                       height: '28px',
                       background: selectedItems.has(item.id) ? 
                                  '#8b5cf6' : 
-                                 getItemColor(item),
+                                 '#06b6d4',
                       border: selectedItems.has(item.id) ? 
                              '2px solid #a855f7' : 
                              '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
                       padding: '0 6px',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
+                      cursor: 'pointer',
+                      overflow: 'hidden',
                       fontSize: '10px',
-                    color: '#fff',
+                      color: '#fff',
                       userSelect: 'none',
                       boxShadow: selectedItems.has(item.id) ? 
                                 '0 2px 4px rgba(139, 92, 246, 0.3)' : 
                                 '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  onMouseDown={(e) => handleItemMouseDown(e, item)}
-                  onContextMenu={(e) => handleContextMenu(e, item)}
+                    }}
+                    onMouseDown={(e) => handleItemMouseDown(e, item)}
+                    onContextMenu={(e) => handleContextMenu(e, item)}
                     onClick={(e) => e.stopPropagation()}
-                >
-                  <span style={{ 
-                    whiteSpace: 'nowrap', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis',
+                  >
+                    <span style={{ 
+                      whiteSpace: 'nowrap', 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis',
                       fontWeight: '500'
-                  }}>
-                    {item.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          );
-        })}
-
-        {/* Video Track Drop Zone - show immediately after video tracks when dragging video items */}
-        {isDragging && dragItem && dragItem.type !== 'audio' && (
-          <div
-            style={{
-              height: '50px',
-              borderBottom: '2px dashed #444',
-              position: 'relative',
-              background: dragTargetTrack?.isNewTrack ? 
-                         'rgba(139, 92, 246, 0.1)' : 
-                         '#1e1e1e',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#666',
-              fontSize: '11px',
-              fontStyle: 'italic',
-              fontWeight: '500'
-            }}
-          >
-            {dragTargetTrack?.isNewTrack ? (
-              <span style={{ color: '#8b5cf6' }}>
-                ✨ Drop here to create new video track
-              </span>
-            ) : (
-              <span>
-                Drop here to create new video track
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Visual Gap Between Video and Audio Tracks */}
-        {trackAssignments.audioTracks.length > 0 && (
-          <div style={{
-            height: '20px',
-            background: '#0a0a0a',
-            borderTop: '1px solid #333',
-            borderBottom: '1px solid #333',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '9px',
-            color: '#555',
-            fontWeight: '500',
-            width: '100%',
-            minWidth: `${duration * scale}px`
-          }}>
-            AUDIO
-          </div>
-        )}
-
-        {/* Audio Tracks - Rendered at the bottom after gap */}
-        {trackAssignments.audioTracks.map((track, trackIndex) => (
-          <div
-            key={`audio-${trackIndex}`}
-            className={`timeline-track ${lockedTracks.has(`audio-${trackIndex}`) ? 'locked' : ''}`}
-            style={{
-              height: '50px',
-              borderBottom: '1px solid #2a2a2a',
-              position: 'relative',
-              background: dragTargetTrack?.index === (trackAssignments.videoTracks.length + trackIndex) && dragTargetTrack?.canPlaceHere ? 
-                         'rgba(139, 92, 246, 0.1)' : 
-                         '#1e1e1e'
-            }}
-          >
-            {/* Track label */}
-            <div style={{
-              position: 'absolute',
-              left: '8px',
-              top: '6px',
-              fontSize: '10px',
-              color: '#888',
-              pointerEvents: 'none',
-              zIndex: 1,
-              fontWeight: '500'
-            }}>
-              🎵 Audio {trackIndex + 1} {lockedTracks.has(`audio-${trackIndex}`) && '🔒'}
+                    }}>
+                      🎵 {item.name}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
+          ))}
 
-            {/* Track items */}
-            {track.map(item => {
-              const left = item.startTime * scale;
-              const width = item.duration * scale;
-              
-              return (
-                <div
-                  key={item.id}
-                  className={`timeline-item ${selectedItems.has(item.id) ? 'selected' : ''}`}
-                  style={{
-                    position: 'absolute',
-                    left: `${left}px`,
-                    top: '18px',
-                    width: `${width}px`,
-                    height: '28px',
-                    background: selectedItems.has(item.id) ? 
-                               '#8b5cf6' : 
-                               '#06b6d4',
-                    border: selectedItems.has(item.id) ? 
-                           '2px solid #a855f7' : 
-                           '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 6px',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    fontSize: '10px',
-                    color: '#fff',
-                    userSelect: 'none',
-                    boxShadow: selectedItems.has(item.id) ? 
-                              '0 2px 4px rgba(139, 92, 246, 0.3)' : 
-                              '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  onMouseDown={(e) => handleItemMouseDown(e, item)}
-                  onContextMenu={(e) => handleContextMenu(e, item)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <span style={{ 
-                    whiteSpace: 'nowrap', 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis',
-                    fontWeight: '500'
-                  }}>
-                    🎵 {item.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-
-        {/* Audio Track Drop Zone - only show when dragging audio items and after audio section */}
-        {isDragging && dragItem && dragItem.type === 'audio' && trackAssignments.audioTracks.length > 0 && (
-          <div
-            style={{
-              height: '50px',
-              borderBottom: '2px dashed #444',
-              position: 'relative',
-              background: dragTargetTrack?.isNewTrack ? 
-                         'rgba(6, 182, 212, 0.1)' : 
-                         '#1e1e1e',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#666',
-              fontSize: '11px',
-              fontStyle: 'italic',
-              fontWeight: '500'
-            }}
-          >
-            {dragTargetTrack?.isNewTrack ? (
-              <span style={{ color: '#06b6d4' }}>
-                ✨ Drop here to create new audio track
-              </span>
-            ) : (
-              <span>
-                Drop here to create new audio track
-              </span>
-            )}
-          </div>
-        )}
-        
-        {/* Calculate total height needed */}
-        <div style={{ 
-          height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
-        }} />
+          {/* Audio Track Drop Zone - only show when dragging audio items and after audio section */}
+          {isDragging && dragItem && dragItem.type === 'audio' && trackAssignments.audioTracks.length > 0 && (
+            <div
+              style={{
+                height: '50px',
+                borderBottom: '2px dashed #444',
+                position: 'relative',
+                background: dragTargetTrack?.isNewTrack ? 
+                           'rgba(6, 182, 212, 0.1)' : 
+                           '#1e1e1e',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#666',
+                fontSize: '11px',
+                fontStyle: 'italic',
+                fontWeight: '500'
+              }}
+            >
+              {dragTargetTrack?.isNewTrack ? (
+                <span style={{ color: '#06b6d4' }}>
+                  ✨ Drop here to create new audio track
+                </span>
+              ) : (
+                <span>
+                  Drop here to create new audio track
+                </span>
+              )}
+            </div>
+          )}
+          
+          {/* Calculate total height needed */}
+          <div style={{ 
+            height: `${Math.max(1, (trackAssignments.videoTracks.length + Math.max(1, trackAssignments.audioTracks.length))) * 50 + 20}px` 
+          }} />
         </div>
+      </div>
+
+      {/* Help text */}
+      <div style={{ 
+        padding: '8px 16px', 
+        fontSize: '10px', 
+        color: '#666',
+        borderTop: '1px solid #2a2a2a',
+        background: '#1a1a1a',
+        fontWeight: '400'
+      }}>
+        💡 Shift+Click: Multi-select | Drag: Select multiple | Scroll: Zoom timeline | Right-click: Context menu
       </div>
 
       {/* Context Menu */}
@@ -2023,20 +2063,8 @@ const Timeline = ({
           </div>
         </div>
       )}
-
-      {/* Help text */}
-      <div style={{ 
-        padding: '8px 16px', 
-        fontSize: '10px', 
-        color: '#666',
-        borderTop: '1px solid #2a2a2a',
-        background: '#1a1a1a',
-        fontWeight: '400'
-      }}>
-        💡 Shift+Click: Multi-select | Drag: Select multiple | Scroll: Zoom timeline | Right-click: Context menu
-      </div>
     </div>
   );
-};
+});
 
 export default Timeline;

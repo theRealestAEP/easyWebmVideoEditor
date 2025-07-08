@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import VideoCanvas from './components/VideoCanvas';
 import Timeline from './components/Timeline';
+import VolumeBar from './components/VolumeBar';
 import Toolbar from './components/Toolbar';
 import ExportProgress from './components/ExportProgress';
 import { VideoComposer } from './utils/VideoComposer';
@@ -17,6 +18,7 @@ function App() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [sourceMedia, setSourceMedia] = useState([]);
   const [isExporting, setIsExporting] = useState(false); // Track export state for UI cleanup
+  const [timelineAudioElements, setTimelineAudioElements] = useState(new Map()); // Track timeline audio elements for VolumeBar
   
   // Settings state
   const [settings, setSettings] = useState({
@@ -32,6 +34,7 @@ function App() {
   const [notification, setNotification] = useState(null);
   
   const fileInputRef = useRef();
+  const timelineRef = useRef();
   const videoComposer = useRef(new VideoComposer());
   const projectManager = useRef(new ProjectManager());
   const lastStateRef = useRef(null);
@@ -53,6 +56,25 @@ function App() {
       setDuration(newDuration);
     }
   }, [mediaItems, calculateDuration, duration]);
+
+  // Update timeline audio elements for VolumeBar
+  useEffect(() => {
+    const updateAudioElements = () => {
+      if (timelineRef.current?.getAudioElements) {
+        const audioElements = timelineRef.current.getAudioElements();
+        setTimelineAudioElements(audioElements);
+        console.log('📊 Updated VolumeBar audio elements:', audioElements.size, 'elements');
+      }
+    };
+
+    // Update immediately if timeline is ready
+    updateAudioElements();
+
+    // Also update periodically to catch new audio elements
+    const interval = setInterval(updateAudioElements, 500);
+
+    return () => clearInterval(interval);
+  }, [mediaItems, isPlaying]); // Re-run when media items or playback state changes
 
   // Get current app state for project management
   const getCurrentState = useCallback(() => {
@@ -1098,18 +1120,29 @@ function App() {
             exportMode={isExporting}
           />
           
-          <Timeline
-            mediaItems={mediaItems}
-            currentTime={currentTime}
-            duration={duration}
-            isPlaying={isPlaying}
-            onTimeUpdate={setCurrentTime}
-            onPlayPause={handlePlayPause}
-            onItemsUpdate={handleTimelineUpdate}
-            onDurationChange={setDuration}
-            playbackFrameRate={settings.exportFrameRate}
-            restoreFileForItem={restoreFileForItem}
-          />
+          {/* Timeline and Volume Bar Container */}
+          <div style={{ display: 'flex', gap: '0', height: '300px' }}>
+            <div style={{ flex: 1 }}>
+              <Timeline
+                ref={timelineRef}
+                mediaItems={mediaItems}
+                currentTime={currentTime}
+                duration={duration}
+                isPlaying={isPlaying}
+                onTimeUpdate={setCurrentTime}
+                onPlayPause={handlePlayPause}
+                onItemsUpdate={handleTimelineUpdate}
+                onDurationChange={setDuration}
+                playbackFrameRate={settings.exportFrameRate}
+                restoreFileForItem={restoreFileForItem}
+              />
+            </div>
+            
+            <VolumeBar 
+              audioElements={timelineAudioElements} 
+              isPlaying={isPlaying} 
+            />
+          </div>
         </div>
       </div>
 
