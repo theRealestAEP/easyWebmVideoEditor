@@ -51,15 +51,56 @@ export class VideoComposer {
       
       // Separate audio and visual items
       const audioItems = mediaItems.filter(item => item.type === 'audio');
+      const videoItems = mediaItems.filter(item => item.type === 'video');
       const visualItems = mediaItems.filter(item => item.type !== 'audio');
+      
+      // Include audio tracks from video files (like MP4s) in addition to dedicated audio items
+      const allAudioSources = [...audioItems];
+      
+      // FIXED: Only extract audio from video files if there's NO separate audio track already
+      // This prevents double audio inclusion for MP4s that have separate audio tracks
+      videoItems.forEach(videoItem => {
+        // Check if there's already a separate audio item for this video
+        // Look for both explicit video audio tracks AND source-linked audio tracks
+        const hasExistingAudioTrack = 
+          // Check if video item is explicitly marked as having an audio track
+          videoItem.hasAudioTrack ||
+          // Check if there's a separate audio item for this video
+          audioItems.some(audioItem => 
+            (audioItem.isVideoAudio && audioItem.sourceVideoId === videoItem.id) ||
+            (audioItem.sourceVideoId === videoItem.sourceId) ||
+            (audioItem.sourceId === videoItem.sourceId && audioItem.type === 'audio') ||
+            (audioItem.audioTrackId === videoItem.id) ||
+            // Check if audio item name matches video name pattern (fallback detection)
+            (audioItem.name && videoItem.name && 
+             audioItem.name.includes(videoItem.name.replace(/\.[^/.]+$/, '')) && 
+             audioItem.name.includes('Audio'))
+          );
+        
+        if (!hasExistingAudioTrack) {
+          // Create a virtual audio item for the video's audio track
+          const videoAudioItem = {
+            ...videoItem,
+            id: `${videoItem.id}_audio`, // Unique ID for the audio track
+            name: `${videoItem.name} (Audio)`,
+            type: 'audio', // Mark as audio for processing
+            isVideoAudio: true, // Flag to indicate this is from a video file
+            originalVideoItem: videoItem // Keep reference to original video item
+          };
+          allAudioSources.push(videoAudioItem);
+          console.log('📹 Creating virtual audio track for video:', videoItem.name);
+        } else {
+          console.log('⏭️ Skipping virtual audio track for video (separate track exists):', videoItem.name, 'hasAudioTrack:', videoItem.hasAudioTrack);
+        }
+      });
 
       // Calculate actual export duration (like Premiere Pro)
       // Should be the maximum of video content end OR audio content end
       let actualDuration = duration; // Start with timeline duration
       
-      // Check if any audio extends beyond current duration
-      if (audioItems.length > 0) {
-        const maxAudioEnd = Math.max(...audioItems.map(item => item.startTime + item.duration));
+      // Check if any audio extends beyond current duration (including video audio)
+      if (allAudioSources.length > 0) {
+        const maxAudioEnd = Math.max(...allAudioSources.map(item => item.startTime + item.duration));
         actualDuration = Math.max(actualDuration, maxAudioEnd);
         console.log('📏 Duration calculation:', {
           originalDuration: duration,
@@ -71,6 +112,9 @@ export class VideoComposer {
       console.log('🎬 Starting 3-Step Export Process:', {
         totalItems: mediaItems.length,
         audioItems: audioItems.length,
+        videoItems: videoItems.length,
+        videoAudioTracks: videoItems.length, // Video files that contribute audio
+        totalAudioSources: allAudioSources.length, // All audio sources including video audio
         visualItems: visualItems.length,
         originalDuration: duration,
         actualDuration: actualDuration,
@@ -90,9 +134,9 @@ export class VideoComposer {
 
       // STEP 2: Audio Mixing → Single Audio Track  
       let finalAudioBlob = null;
-      if (audioItems.length > 0) {
+      if (allAudioSources.length > 0) {
         console.log('🎵 STEP 2: Mixing audio tracks...');
-        finalAudioBlob = await this.mixAudioTracks(audioItems, actualDuration, (progress, status) => {
+        finalAudioBlob = await this.mixAudioTracks(allAudioSources, actualDuration, (progress, status) => {
           safeOnProgress(60 + progress * 0.3, status); // 60-90% for audio mixing
         });
         console.log('✅ STEP 2 Complete - Audio mixed:', finalAudioBlob?.size || 0, 'bytes');
@@ -137,10 +181,10 @@ export class VideoComposer {
     // Setup MediaRecorder with high quality settings
     const stream = recordingCanvas.captureStream(fps);
     
-    // Try different codec options for best quality
-    let mimeType = 'video/webm;codecs=vp9';
+    // Try VP8 first for better transparency support
+    let mimeType = 'video/webm;codecs=vp8';
     if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = 'video/webm;codecs=vp8';
+      mimeType = 'video/webm;codecs=vp9';
     }
     if (!MediaRecorder.isTypeSupported(mimeType)) {
       mimeType = 'video/webm';
@@ -195,12 +239,11 @@ export class VideoComposer {
         // This handles both video content and extended audio-only sections
         await onTimelineSeek(currentTime);
         
-        // Minimal delay for canvas to render
-        await new Promise(resolve => setTimeout(resolve, 16));
+        // Wait two animation frames to ensure canvas has rendered the new content
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-        // Clear recording canvas with black background for extended sections
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, width, height);
+        // Clear recording canvas to transparent background for VP8 transparency support
+        ctx.clearRect(0, 0, width, height);
         
         // Scale and draw the existing canvas onto our recording canvas
         const sourceWidth = existingCanvas.width;
@@ -218,14 +261,14 @@ export class VideoComposer {
         const offsetX = (width - scaledWidth) / 2;
         const offsetY = (height - scaledHeight) / 2;
 
-        // Draw the canvas content (this will be black/empty if beyond video content)
+        // Draw the canvas content (preserves transparency with VP8)
         ctx.drawImage(existingCanvas, offsetX, offsetY, scaledWidth, scaledHeight);
 
         frameIndex++;
         
-        // Use the exact same timing as the preview framerate
-        const nextFrameDelay = 1000 / fps;
-        setTimeout(renderFrame, nextFrameDelay);
+        // FIXED: Remove the setTimeout delay - let the MediaRecorder handle timing
+        // This was causing the slow motion effect by adding unnecessary delays
+        renderFrame();
       };
 
       // Start the frame capture process
@@ -281,6 +324,36 @@ export class VideoComposer {
           } else {
             console.warn('❌ Skipping audio item with no valid source:', audioItem.name);
             continue;
+          }
+          
+          // For video audio items, we need to extract just the audio track
+          if (audioItem.isVideoAudio) {
+            console.log(`🎬 Extracting audio from video file: ${audioItem.name}`);
+            
+            // Write the video file temporarily
+            const tempVideoFile = `temp_video_${i}.mp4`;
+            await this.ffmpeg.writeFile(tempVideoFile, await fetchFile(audioBlob));
+            
+            // Extract audio track from video file
+            const extractedAudioFile = `extracted_audio_${i}.mp3`;
+            await this.ffmpeg.exec([
+              '-i', tempVideoFile,
+              '-vn', // No video
+              '-acodec', 'mp3',
+              '-ab', '192k',
+              '-y',
+              extractedAudioFile
+            ]);
+            
+            // Read the extracted audio
+            const extractedAudioData = await this.ffmpeg.readFile(extractedAudioFile);
+            audioBlob = new Blob([extractedAudioData.buffer], { type: 'audio/mp3' });
+            
+            // Clean up temporary files
+            await this.ffmpeg.deleteFile(tempVideoFile);
+            await this.ffmpeg.deleteFile(extractedAudioFile);
+            
+            console.log(`✅ Audio extracted from video: ${audioBlob.size} bytes`);
           }
           
           await this.ffmpeg.writeFile(audioFileName, await fetchFile(audioBlob));
@@ -406,6 +479,8 @@ export class VideoComposer {
       await this.cleanupAudioFiles(['mixed_audio.webm']);
       for (let i = 0; i < audioItems.length; i++) {
         await this.cleanupAudioFiles([`audio_${i}.mp3`]);
+        // Clean up potential video audio extraction files
+        await this.cleanupAudioFiles([`temp_video_${i}.mp4`, `extracted_audio_${i}.mp3`]);
       }
       
       return null; // Return null to allow video-only export

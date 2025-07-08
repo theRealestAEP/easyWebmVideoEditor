@@ -143,8 +143,8 @@ const Toolbar = ({
               </div>
               
               <div className="settings-section">
-                <h3>Export Frame Rate</h3>
-                <div className="settings-row">
+                {/* <h3>Export Frame Rate</h3> */}
+                {/* <div className="settings-row">
                   <label>FPS (1-30):</label>
                   <input
                     type="number"
@@ -154,8 +154,8 @@ const Toolbar = ({
                     onChange={(e) => handleFrameRateChange(parseInt(e.target.value))}
                     className="fps-input"
                   />
-                </div>
-                <div className="settings-row">
+                </div> */}
+                {/* <div className="settings-row">
                   <div className="fps-presets">
                     <button
                       className={`preset-button small ${settings.exportFrameRate === 15 ? 'active' : ''}`}
@@ -176,7 +176,7 @@ const Toolbar = ({
                       30 FPS
                     </button>
                   </div>
-                </div>
+                </div> */}
               </div>
             </div>
           )}

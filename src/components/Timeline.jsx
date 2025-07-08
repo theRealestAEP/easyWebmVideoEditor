@@ -4,7 +4,7 @@ import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperat
 // This allows items to be placed truly back-to-back with 0 gap
 const COLLISION_TOLERANCE = 0.05; // 50ms tolerance to account for 0.1s snapping grid
 
-// Snapping distance for intelligent item-to-item snapping
+
 const SNAP_DISTANCE = 0.2; // 200ms - snap to adjacent items when within this distance
 
 const Timeline = forwardRef(({ 
@@ -325,27 +325,53 @@ const Timeline = forwardRef(({
 
   // Audio playback management
   useEffect(() => {
-    // Include both dedicated audio items AND video items (which may have audio tracks)
+    // Only include dedicated audio items - video items are PNG sequences and shouldn't play audio
     const audioItems = mediaItems.filter(item => item.type === 'audio');
-    const videoItems = mediaItems.filter(item => item.type === 'video');
-    const allAudioSources = [...audioItems, ...videoItems];
+    const allAudioSources = [...audioItems];
     
     console.log('Timeline audio management:', {
       audioItems: audioItems.length,
-      videoItems: videoItems.length,
       totalAudioSources: allAudioSources.length
     });
     
     // Create audio elements for new audio sources (both audio files and video files)
     allAudioSources.forEach(item => {
       if (!audioElements.current.has(item.id)) {
-        const audio = new Audio(item.url);
+        let audioUrl;
+        
+        // Prioritize original File object for uploaded MP4s to preserve audio
+        if (item.file && item.file instanceof File) {
+          audioUrl = URL.createObjectURL(item.file);
+          console.log('Creating audio element from File object for:', item.name, 'type:', item.type);
+        } else if (item.url) {
+          audioUrl = item.url;
+          console.log('Creating audio element from URL for:', item.name, 'type:', item.type);
+        } else {
+          console.warn('No valid audio source found for:', item.name);
+          return;
+        }
+        
+        const audio = new Audio(audioUrl);
         audio.preload = 'auto';
         audio.crossOrigin = 'anonymous'; // Enable CORS for Web Audio API
         
-        // For video files, we're only interested in the audio track
+        // For video files, we're extracting the audio track for timeline playback
         if (item.type === 'video') {
-          console.log('Creating audio element for video file audio track:', item.name);
+          console.log('Preserving audio track from video file:', item.name);
+          
+          // Handle MP4 audio track loading
+          audio.addEventListener('loadedmetadata', () => {
+            console.log('MP4 audio metadata loaded:', {
+              name: item.name,
+              duration: audio.duration,
+              hasAudioTrack: audio.duration > 0
+            });
+          });
+          
+          // Handle potential audio loading issues
+          audio.addEventListener('error', (e) => {
+            console.warn('Audio loading failed for video file:', item.name, e);
+          });
         }
         
         audioElements.current.set(item.id, audio);
@@ -357,6 +383,10 @@ const Timeline = forwardRef(({
     for (const [id, audio] of audioElements.current.entries()) {
       if (!currentAudioIds.has(id)) {
         audio.pause();
+        // Clean up blob URL if it was created from a File object
+        if (audio.src && audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
         audioElements.current.delete(id);
         console.log('Removed audio element for deleted item:', id);
       }
@@ -398,6 +428,9 @@ const Timeline = forwardRef(({
       // Cleanup audio elements when component unmounts
       for (const audio of audioElements.current.values()) {
         audio.pause();
+        if (audio.src && audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
       }
     };
   }, [mediaItems, isPlaying, currentTime]);
@@ -1587,9 +1620,7 @@ const Timeline = forwardRef(({
         e.target.closest('.timeline-container')
       );
 
-      // For delete operations, only proceed if we're not typing AND either:
-      // 1. Focus is within timeline, OR 
-      // 2. Timeline has selected items AND no other interactive element has focus
+
       const shouldHandleDelete = !isTyping && (
         isFocusInTimeline || 
         (selectedItems.size > 0 && !document.activeElement?.closest('.source-media-panel'))

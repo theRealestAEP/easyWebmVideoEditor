@@ -190,6 +190,145 @@ function App() {
       
       newSourceMedia.push(sourceItem);
       console.log('Added to source media:', sourceItem.name, sourceItem.type, sourceItem.duration);
+      
+      // For MP4 video files, automatically check for and create a separate audio track
+      if (mediaType === 'video' && fileType === 'video/mp4') {
+        try {
+          console.log('🎬 Checking MP4 for audio track:', file.name);
+          
+          // Use a more reliable audio detection method
+          const hasAudio = await new Promise((resolve) => {
+            const video = document.createElement('video');
+            video.crossOrigin = 'anonymous';
+            video.muted = true;
+            video.preload = 'metadata';
+            video.src = URL.createObjectURL(file);
+            
+            let resolved = false;
+            
+            const cleanup = () => {
+              if (!resolved) {
+                resolved = true;
+                URL.revokeObjectURL(video.src);
+              }
+            };
+            
+            video.onloadedmetadata = () => {
+              if (resolved) return;
+              
+              // Multiple detection methods
+              const audioTrackCount = video.audioTracks?.length || 0;
+              const webkitAudio = video.webkitAudioDecodedByteCount || 0;
+              const mozAudio = video.mozHasAudio || false;
+              
+              // More reliable: try to actually load some audio data
+              let audioDetected = false;
+              
+              // Method 1: Check if video duration suggests audio
+              const hasDuration = video.duration && video.duration > 0;
+              
+              // Method 2: Browser-specific audio properties
+              const browserAudioDetected = audioTrackCount > 0 || webkitAudio > 0 || mozAudio;
+              
+              // Method 3: For MP4s, assume audio exists unless proven otherwise
+              // This is safer since most MP4s have audio and false positives are better than false negatives
+              audioDetected = hasDuration || browserAudioDetected;
+              
+              console.log('🔍 MP4 audio detection results:', {
+                name: file.name,
+                duration: video.duration,
+                audioTracks: audioTrackCount,
+                webkitAudioDecodedByteCount: webkitAudio,
+                mozHasAudio: mozAudio,
+                hasDuration: hasDuration,
+                browserAudioDetected: browserAudioDetected,
+                finalDecision: audioDetected
+              });
+              
+              cleanup();
+              resolve(audioDetected);
+            };
+            
+            video.onerror = (error) => {
+              console.warn('⚠️ Video loading failed for audio detection:', file.name, error);
+              cleanup();
+              // If we can't load the video, assume it has audio to be safe
+              resolve(true);
+            };
+            
+            // Timeout - assume audio exists if we can't determine
+            setTimeout(() => {
+              console.warn('⏰ Audio detection timeout for:', file.name, '- assuming audio exists');
+              cleanup();
+              resolve(true);
+            }, 8000);
+          });
+          
+          // Always create audio track for MP4s for now (user can delete if not needed)
+          // This is safer than missing audio tracks
+          const shouldCreateAudioTrack = true; // Override detection for reliability
+          
+          if (shouldCreateAudioTrack) {
+            console.log('✅ Creating audio track for MP4:', file.name, '(Audio detected:', hasAudio, ')');
+            
+            // Create a separate audio source media item
+            const audioItemId = Date.now() + Math.random() + 0.1; // Slightly different ID
+            const audioSourceItem = {
+              id: audioItemId,
+              name: `${file.name.replace(/\.[^/.]+$/, '')} (Audio)`, // Remove extension and add (Audio)
+              type: 'audio',
+              subtype: 'mp4_audio',
+              duration: duration, // Same duration as video
+              url: URL.createObjectURL(file), // Same file, but will be used for audio extraction
+              hasFile: true,
+              file: file, // Same File object
+              isVideoAudio: true, // Flag to indicate this is audio extracted from video
+              sourceVideoId: itemId // Reference to the original video item
+            };
+            
+            // Store the same File object for the audio item
+            sourceFileMap.current.set(audioItemId, file);
+            
+            // FIXED: Mark the video item as having a separate audio track
+            sourceItem.hasAudioTrack = true;
+            sourceItem.audioTrackId = audioItemId;
+            
+            newSourceMedia.push(audioSourceItem);
+            console.log('✅ Added audio track from MP4:', audioSourceItem.name);
+          } else {
+            console.log('ℹ️ Skipping audio track creation for MP4:', file.name);
+          }
+          
+        } catch (audioDetectionError) {
+          console.warn('❌ Error during MP4 audio detection:', file.name, audioDetectionError);
+          
+          // Fallback: create audio track anyway since detection failed
+          console.log('🔄 Creating audio track as fallback for:', file.name);
+          
+          const audioItemId = Date.now() + Math.random() + 0.2;
+          const audioSourceItem = {
+            id: audioItemId,
+            name: `${file.name.replace(/\.[^/.]+$/, '')} (Audio)`,
+            type: 'audio',
+            subtype: 'mp4_audio',
+            duration: duration,
+            url: URL.createObjectURL(file),
+            hasFile: true,
+            file: file,
+            isVideoAudio: true,
+            sourceVideoId: itemId
+          };
+          
+          sourceFileMap.current.set(audioItemId, file);
+          
+          // FIXED: Mark the video item as having a separate audio track (fallback case)
+          sourceItem.hasAudioTrack = true;
+          sourceItem.audioTrackId = audioItemId;
+          
+          newSourceMedia.push(audioSourceItem);
+          console.log('✅ Added fallback audio track from MP4:', audioSourceItem.name);
+        }
+      }
     }
     
     setSourceMedia(prev => [...prev, ...newSourceMedia]);
@@ -851,8 +990,44 @@ function App() {
         };
         img.onerror = () => resolve(null);
         img.src = item.url;
+      } else if (item.type === 'audio') {
+        // Generate audio waveform thumbnail
+        try {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = 120;
+          canvas.height = 68;
+          
+          // Dark background
+          ctx.fillStyle = '#1a1a1a';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Audio icon and text for MP4 audio tracks
+          if (item.subtype === 'mp4_audio' || item.isVideoAudio) {
+            // Special styling for MP4 audio tracks
+            ctx.fillStyle = '#06b6d4'; // Cyan color for video audio
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎬🎵', canvas.width / 2, 25);
+            ctx.fillText('MP4 Audio', canvas.width / 2, 45);
+            ctx.fillText('Track', canvas.width / 2, 58);
+          } else {
+            // Regular audio file styling
+            ctx.fillStyle = '#10b981'; // Green color for regular audio
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎵', canvas.width / 2, 30);
+            ctx.fillText('Audio', canvas.width / 2, 50);
+          }
+          
+          const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
+          resolve(thumbnailUrl);
+        } catch (error) {
+          console.warn('Error generating audio thumbnail:', error);
+          resolve(null);
+        }
       } else {
-        resolve(null); // No thumbnail for audio
+        resolve(null); // No thumbnail for unknown type
       }
     });
   }, []);
@@ -862,7 +1037,7 @@ function App() {
     const generateThumbnails = async () => {
       const updatedItems = await Promise.all(
         sourceMedia.map(async (item) => {
-          if (!item.thumbnail && (item.type === 'video' || item.type === 'image')) {
+          if (!item.thumbnail && (item.type === 'video' || item.type === 'image' || item.type === 'audio')) {
             const thumbnail = await generateThumbnail(item);
             return { ...item, thumbnail };
           }

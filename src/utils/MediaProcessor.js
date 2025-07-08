@@ -68,10 +68,10 @@ export class MediaProcessor {
   async doExtractFrames(mediaItem, onProgress) {
     const cacheKey = `${mediaItem.id}_frames`;
 
-    // Use native browser processing for MP4s to avoid FFmpeg issues
+    // For MP4s, just use FFmpeg with simple settings - browser video seeking is too unreliable
     if (mediaItem.type === 'video' && this.getFileExtension(mediaItem) === 'mp4') {
-      console.log('Using native browser processing for MP4:', mediaItem.name);
-      return await this.extractFramesNative(mediaItem, onProgress);
+      console.log('Using FFmpeg for MP4 processing (reliable approach):', mediaItem.name);
+      // Continue with regular FFmpeg processing below
     }
     
     await this.initialize();
@@ -185,8 +185,8 @@ export class MediaProcessor {
         video.onloadedmetadata = async () => {
           try {
             const duration = video.duration;
-            const targetFPS = 10; // Lower FPS for MP4s
-            const maxFrames = Math.min(Math.ceil(duration * targetFPS), 150); // Limit frames
+            const targetFPS = 10; // Good balance of quality and performance
+            const maxFrames = Math.min(Math.ceil(duration * targetFPS), 120); // Reasonable limit
             
             console.log(`MP4 metadata loaded: ${duration}s, extracting ${maxFrames} frames`);
             onProgress?.(20, `Extracting ${maxFrames} frames from ${mediaItem.name}...`);
@@ -194,7 +194,7 @@ export class MediaProcessor {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Set reasonable canvas size
+            // Set reasonable canvas size - balance quality vs performance
             const maxSize = 640;
             const aspectRatio = video.videoWidth / video.videoHeight;
             if (video.videoWidth > video.videoHeight) {
@@ -206,40 +206,102 @@ export class MediaProcessor {
             }
             
             const frames = [];
+            let successfulFrames = 0;
+            let skippedFrames = 0;
             
+            // Improved frame extraction with better error handling
             for (let i = 0; i < maxFrames; i++) {
               const time = (i / targetFPS);
               if (time >= duration) break;
               
-              video.currentTime = time;
-              
-              await new Promise(resolve => {
-                video.onseeked = resolve;
-                video.onerror = resolve; // Continue even if seek fails
-              });
-              
-              // Draw frame to canvas
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              
-              // Convert to blob URL
-              const frameUrl = canvas.toDataURL('image/png');
-              
-              frames.push({
-                index: i,
-                url: frameUrl,
-                timestamp: time
-              });
-              
-              // Update progress
-              if (i % 5 === 0) {
-                const progress = 20 + (i / maxFrames) * 70;
-                onProgress?.(progress, `Extracted ${i + 1}/${maxFrames} frames from ${mediaItem.name}...`);
+              try {
+                // Set the time and wait for seeking to complete
+                video.currentTime = time;
+                
+                // Wait for seek to complete with robust timeout
+                await new Promise((seekResolve, seekReject) => {
+                  let seekCompleted = false;
+                  
+                  const onSeeked = () => {
+                    if (!seekCompleted) {
+                      seekCompleted = true;
+                      video.removeEventListener('seeked', onSeeked);
+                      video.removeEventListener('error', onError);
+                      seekResolve();
+                    }
+                  };
+                  
+                  const onError = (error) => {
+                    if (!seekCompleted) {
+                      seekCompleted = true;
+                      video.removeEventListener('seeked', onSeeked);
+                      video.removeEventListener('error', onError);
+                      console.warn(`Seek failed for frame ${i} at time ${time}s, continuing...`);
+                      seekResolve(); // Continue with next frame instead of failing
+                    }
+                  };
+                  
+                  video.addEventListener('seeked', onSeeked);
+                  video.addEventListener('error', onError);
+                  
+                  // Timeout for seek operation - reduced from 3000ms to 1500ms for faster processing
+                  setTimeout(() => {
+                    if (!seekCompleted) {
+                      seekCompleted = true;
+                      video.removeEventListener('seeked', onSeeked);
+                      video.removeEventListener('error', onError);
+                      console.warn(`Seek timeout for frame ${i} at time ${time}s, continuing...`);
+                      seekResolve(); // Continue with next frame
+                    }
+                  }, 1500);
+                });
+                
+                // Small delay to ensure frame is ready
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                // Draw frame to canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Check if video is ready for drawing
+                if (video.readyState >= 2) { // HAVE_CURRENT_DATA
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  
+                  // Convert to blob URL - use PNG for quality
+                  const frameUrl = canvas.toDataURL('image/png', 0.9);
+                  
+                  frames.push({
+                    index: i,
+                    url: frameUrl,
+                    timestamp: time
+                  });
+                  
+                  successfulFrames++;
+                } else {
+                  console.warn(`⚠️ Video not ready for frame ${i} at time ${time}s, skipping`);
+                  skippedFrames++;
+                }
+                
+                // Update progress more frequently for better UX
+                if (i % 3 === 0) {
+                  const progress = 20 + (i / maxFrames) * 70;
+                  onProgress?.(progress, `Extracted ${successfulFrames}/${maxFrames} frames from ${mediaItem.name}...`);
+                }
+                
+              } catch (frameError) {
+                console.warn(`Error extracting frame ${i} at time ${time}s:`, frameError.message);
+                skippedFrames++;
+                continue; // Continue with next frame instead of failing completely
               }
             }
             
             // Cleanup
             URL.revokeObjectURL(videoUrl);
+            
+            if (frames.length === 0) {
+              throw new Error(`No frames could be extracted from ${mediaItem.name}`);
+            }
+            
+            console.log(`✅ MP4 processing complete: ${successfulFrames} successful, ${skippedFrames} skipped frames`);
             
             const frameData = {
               type: 'animated',
@@ -318,64 +380,35 @@ export class MediaProcessor {
     try {
       console.log('Starting frame extraction for:', mediaItem.name, 'Input file:', inputFileName);
       
-      let processedInputFile = inputFileName;
-      
-      // Pre-process MP4 files to a simpler format to prevent hanging
+      // For MP4s, use simple, direct frame extraction
       if (inputFileName.endsWith('.mp4')) {
-        console.log('Pre-processing MP4 file for compatibility...');
-        onProgress?.(25, `Converting ${mediaItem.name} for processing...`);
+        console.log('Using direct MP4 frame extraction...');
+        onProgress?.(25, `Extracting frames from ${mediaItem.name}...`);
         
-        const tempFileName = 'temp_converted.webm';
-        
-        try {
-          // Convert MP4 to WebM first with simple settings
-          const convertArgs = [
-            '-i', inputFileName,
-            '-c:v', 'libvpx',
-            '-crf', '30',
-            '-b:v', '1M',
-            '-vf', 'scale=640:-1', // Scale down to reduce complexity
-            '-t', '30', // Limit to 30 seconds to prevent memory issues
-            '-an', // Remove audio for now
-            '-y',
-            tempFileName
-          ];
-          
-          console.log('MP4 conversion command:', convertArgs.join(' '));
-          
-          const convertTimeout = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('MP4 conversion timeout')), 45000);
-          });
-          
-          await Promise.race([this.ffmpeg.exec(convertArgs), convertTimeout]);
-          
-          processedInputFile = tempFileName;
-          console.log('MP4 conversion completed, using:', processedInputFile);
-          onProgress?.(40, `Extracting frames from converted ${mediaItem.name}...`);
-          
-        } catch (convertError) {
-          console.warn('MP4 conversion failed, trying direct processing:', convertError);
-          onProgress?.(30, `Direct processing ${mediaItem.name}...`);
-        }
-      }
-      
-      // Use MP4-specific options for better compatibility
-      let ffmpegArgs;
-      if (inputFileName.endsWith('.mp4')) {
-        // Simplified MP4 processing
-        ffmpegArgs = [
-          '-i', processedInputFile,
-          '-vf', `fps=${Math.min(targetFPS, 10)}`, // Lower FPS for MP4
-          '-vframes', '150', // Limit frames
+        // Simple, direct MP4 frame extraction
+        const directArgs = [
+          '-i', inputFileName,
+          '-vf', `fps=${targetFPS}`, // Direct FPS conversion
           '-f', 'image2',
-          '-pix_fmt', 'rgb24', // Simpler pixel format for MP4
-          '-s', '640x360', // Fixed smaller size to reduce complexity
+          '-pix_fmt', 'rgba',
+          '-q:v', '2', // High quality
           '-y',
           outputPattern
         ];
+        
+        console.log('Direct MP4 extraction command:', directArgs.join(' '));
+        
+        // Reasonable timeout for direct processing
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('MP4 direct processing timeout (60s)')), 60000);
+        });
+        
+        await Promise.race([this.ffmpeg.exec(directArgs), timeoutPromise]);
+        console.log('Direct MP4 frame extraction completed for:', mediaItem.name);
+        
       } else {
         // Standard processing for other formats
-        ffmpegArgs = [
+        const ffmpegArgs = [
           '-i', inputFileName,
           '-vf', `fps=${targetFPS}`,
           '-f', 'image2',
@@ -383,60 +416,21 @@ export class MediaProcessor {
           '-y',
           outputPattern
         ];
-      }
-      
-      console.log('FFmpeg frame extraction command:', ffmpegArgs.join(' '));
-      
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('FFmpeg processing timeout (60s)')), 60000);
-      });
-      
-      const execPromise = this.ffmpeg.exec(ffmpegArgs);
-      
-      await Promise.race([execPromise, timeoutPromise]);
-      console.log('FFmpeg frame extraction completed for:', mediaItem.name);
-      
-      // Clean up temporary file if we created one
-      if (processedInputFile !== inputFileName) {
-        try {
-          await this.ffmpeg.deleteFile(processedInputFile);
-        } catch (cleanupError) {
-          console.warn('Could not cleanup temp file:', cleanupError);
-        }
+        
+        console.log('Standard frame extraction command:', ffmpegArgs.join(' '));
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('FFmpeg processing timeout (60s)')), 60000);
+        });
+        
+        await Promise.race([this.ffmpeg.exec(ffmpegArgs), timeoutPromise]);
+        console.log('Standard frame extraction completed for:', mediaItem.name);
       }
       
     } catch (ffmpegError) {
       console.error('FFmpeg execution failed for:', mediaItem.name, ffmpegError);
-      
-      // Try ultra-simple fallback for problematic MP4s
-      if (inputFileName.endsWith('.mp4') && !ffmpegError.message.includes('timeout')) {
-        console.log('Trying ultra-simple MP4 fallback...');
-        try {
-          const ultraSimpleArgs = [
-      '-i', inputFileName,
-            '-vf', 'fps=5,scale=320:240', // Very low resolution and FPS
-            '-vframes', '50', // Very limited frames
-            '-f', 'image2',
-            '-pix_fmt', 'rgb24',
-            '-y',
-      outputPattern
-          ];
-          
-          console.log('Ultra-simple fallback command:', ultraSimpleArgs.join(' '));
-          const ultraTimeout = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Ultra-simple timeout (20s)')), 20000);
-          });
-          
-          await Promise.race([this.ffmpeg.exec(ultraSimpleArgs), ultraTimeout]);
-          console.log('Ultra-simple MP4 processing succeeded for:', mediaItem.name);
-        } catch (ultraError) {
-          console.error('All MP4 processing methods failed:', ultraError);
-          throw new Error(`MP4 processing failed: This MP4 format is not supported. Please convert to WebM or GIF format for best results.`);
-        }
-      } else {
-        throw new Error(`FFmpeg frame extraction failed: ${ffmpegError.message || ffmpegError}`);
-      }
+      throw new Error(`FFmpeg frame extraction failed: ${ffmpegError.message || ffmpegError}`);
     }
     
     // Read extracted frames using the same pattern
@@ -914,5 +908,53 @@ export class MediaProcessor {
     return firstFrame.isPreScaled && 
            firstFrame.scaledWidth === targetWidth && 
            firstFrame.scaledHeight === targetHeight;
+  }
+
+  // Helper method to test if a video file has an audio track that can be played
+  async testVideoAudioTrack(mediaItem) {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.preload = 'metadata';
+      
+      let videoUrl;
+      if (mediaItem.file && mediaItem.file instanceof File) {
+        videoUrl = URL.createObjectURL(mediaItem.file);
+      } else if (mediaItem.url) {
+        videoUrl = mediaItem.url;
+      } else {
+        resolve({ hasAudio: false, error: 'No video source available' });
+        return;
+      }
+      
+      video.src = videoUrl;
+      
+      video.onloadedmetadata = () => {
+        const hasAudio = video.audioTracks?.length > 0 || video.webkitAudioDecodedByteCount > 0 || video.mozHasAudio;
+        console.log('Video audio track test:', {
+          name: mediaItem.name,
+          hasAudio: hasAudio,
+          audioTracks: video.audioTracks?.length || 0,
+          webkitAudioDecodedByteCount: video.webkitAudioDecodedByteCount || 0,
+          mozHasAudio: video.mozHasAudio || false
+        });
+        
+        URL.revokeObjectURL(videoUrl);
+        resolve({ hasAudio: hasAudio, duration: video.duration });
+      };
+      
+      video.onerror = (error) => {
+        console.warn('Video audio track test failed:', error);
+        URL.revokeObjectURL(videoUrl);
+        resolve({ hasAudio: false, error: 'Video loading failed' });
+      };
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        URL.revokeObjectURL(videoUrl);
+        resolve({ hasAudio: false, error: 'Video loading timeout' });
+      }, 10000);
+    });
   }
 } 
