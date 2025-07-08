@@ -19,6 +19,7 @@ const Toolbar = ({
   currentProjectName
 }) => {
   const [showSettings, setShowSettings] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
   const settingsRef = useRef();
 
   // Close settings dropdown when clicking outside
@@ -46,6 +47,19 @@ const Toolbar = ({
       ...settings,
       exportFrameRate: Math.min(30, Math.max(1, fps))
     });
+  };
+
+  const handleClearAll = () => {
+    setShowClearModal(true);
+  };
+
+  const handleConfirmClear = () => {
+    onClear();
+    setShowClearModal(false);
+  };
+
+  const handleCancelClear = () => {
+    setShowClearModal(false);
   };
 
   return (
@@ -177,10 +191,28 @@ const Toolbar = ({
           Export WebM
         </button>
       
-        <button onClick={onClear} className="clear-button">
+        <button onClick={handleClearAll} className="clear-button">
           Clear All
         </button>
       </div>
+
+      {/* Confirmation Modal */}
+      {showClearModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Clear All Content</h3>
+            <p>Are you sure you want to clear all media and timeline content? This action cannot be undone.</p>
+            <div className="modal-buttons">
+              <button onClick={handleCancelClear} className="modal-button cancel">
+                Cancel
+              </button>
+              <button onClick={handleConfirmClear} className="modal-button confirm">
+                Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
