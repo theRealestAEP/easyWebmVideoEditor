@@ -266,11 +266,21 @@ export class VideoComposer {
 
         frameIndex++;
         
-        // FIXED: Remove the setTimeout delay - let the MediaRecorder handle timing
-        // This was causing the slow motion effect by adding unnecessary delays
-        renderFrame();
+        // FIXED: Proper frame timing to match target FPS
+        // Use requestAnimationFrame with proper timing instead of immediate recursion
+        const targetFrameTime = 1000 / fps; // Time per frame in milliseconds
+        const nextFrameTime = frameIndex * targetFrameTime;
+        const elapsedTime = performance.now() - startTime;
+        const delay = Math.max(0, nextFrameTime - elapsedTime);
+        
+        setTimeout(() => {
+          renderFrame();
+        }, delay);
       };
 
+      // Track start time for proper timing
+      const startTime = performance.now();
+      
       // Start the frame capture process
       renderFrame();
     });
