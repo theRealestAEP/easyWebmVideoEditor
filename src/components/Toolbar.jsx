@@ -82,22 +82,10 @@ const Toolbar = ({
         
         {/* Project Management */}
         <button onClick={onSaveProject} className="project-button save">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-            <polyline points="17,21 17,13 7,13 7,21"/>
-            <polyline points="7,3 7,8 15,8"/>
-          </svg>
-          Save
+          💾 Save
         </button>
         <button onClick={onLoadProject} className="project-button load">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14,2 14,8 20,8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-            <line x1="10" y1="9" x2="8" y2="9"/>
-          </svg>
-          Load
+          📁 Load
         </button>
         
         <div className="toolbar-divider"></div>
@@ -109,10 +97,7 @@ const Toolbar = ({
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 7v6h6"/>
-            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-          </svg>
+          ↶
         </button>
         <button 
           onClick={onRedo} 
@@ -120,19 +105,12 @@ const Toolbar = ({
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 7v6h-6"/>
-            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
-          </svg>
+          ↷
         </button>
         
         {currentProjectName && (
           <div className="project-name">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14,2 14,8 20,8"/>
-            </svg>
-            {currentProjectName}
+            📄 {currentProjectName}
           </div>
         )}
       </div>
@@ -144,11 +122,7 @@ const Toolbar = ({
           className="about-button"
           title="About this tool"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M9,9h0a3,3,0,0,1,6,0c0,2-3,3-3,3"/>
-            <path d="M12,17h0"/>
-          </svg>
+          ℹ️
         </button>
       </div>
       
@@ -263,40 +237,16 @@ const Toolbar = ({
             <h3>About EZ Web Video Editor</h3>
             <div className="about-content">
               <p>
-                EZ Web Video Editor is a modern web-based video editing tool specifically designed to create and export videos in <strong>transparent WebM format</strong>.
+                EZ Web Video Editor is a web-based video editing tool specifically designed to create and export videos in <strong>transparent WebM format</strong>.
               </p>
               <p>
                 <strong>Key Features:</strong>
               </p>
               <ul>
-                <li>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style="display: inline; margin-right: 8px; vertical-align: text-top;">
-                    <path d="M9 12l2 2 4-4"/>
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  Everything runs and is stored locally on your device - no data leaves your browser
-                </li>
-                <li>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style="display: inline; margin-right: 8px; vertical-align: text-top;">
-                    <path d="M9 12l2 2 4-4"/>
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  Export videos with transparency support (WebM format)
-                </li>
-                <li>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style="display: inline; margin-right: 8px; vertical-align: text-top;">
-                    <path d="M9 12l2 2 4-4"/>
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  Perfect for creating short memes and video assets
-                </li>
-                <li>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style="display: inline; margin-right: 8px; vertical-align: text-top;">
-                    <path d="M9 12l2 2 4-4"/>
-                    <circle cx="12" cy="12" r="10"/>
-                  </svg>
-                  Modern drag-and-drop interface for intuitive editing
-                </li>
+                <li>Everything runs and is stored locally on your device - no data leaves your browser</li>
+                <li>Export videos with transparency support (WebM format)</li>
+                <li>Perfect for creating short memes and video assets</li>
+                <li>Simple drag-and-drop interface for quick editing</li>
               </ul>
               <p>
                 This tool was designed to create short memes and assets for <a href="https://tangia.co" target="_blank" rel="noopener noreferrer"><strong>Tangia.co</strong></a> - the ultimate platform for streamer interactions and engagement.
